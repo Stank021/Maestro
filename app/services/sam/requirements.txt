@@ -3,8 +3,11 @@
 # Note: torch/torchvision installed separately from cu128 index
 
 # SAM 3 core deps
+# numpy is capped below 2 to match sam3's own pin (numpy<2,>=1.26). Anything that
+# ships wheels built against the NumPy 2 ABI must be capped to match — see
+# opencv-python-headless and scipy below.
 timm>=1.0.17
-numpy>=2
+numpy>=1.26,<2
 tqdm
 ftfy==6.1.1
 regex
@@ -17,7 +20,7 @@ psutil
 einops
 pycocotools
 decord
-opencv-python-headless
+opencv-python-headless<4.12   # 4.12+ is built against the NumPy 2 ABI
 
 # Triton (platform-specific)
 triton-windows; sys_platform == 'win32'
@@ -28,5 +31,5 @@ xformers
 fastapi>=0.115.0
 uvicorn>=0.34.0
 Pillow>=10.0
-scipy
+scipy<1.17                    # 1.17+ is built against the NumPy 2 ABI
 ninja

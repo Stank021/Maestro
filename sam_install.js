@@ -29,11 +29,15 @@ module.exports = {
           python: "3.12"
         },
         message: [
-          "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128"
+          "pip install torch torchvision \"numpy>=1.26,<2\" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple"
         ]
       }
     },
     // Step 3: Install SAM 3 package + all microservice deps from requirements.txt
+    // Both are passed to a SINGLE pip invocation on purpose: sam3 pins numpy<2 and
+    // requirements.txt pins the NumPy-1-ABI builds of opencv/scipy. Installing them as
+    // two separate commands lets the second one silently clobber the first's numpy
+    // (pip only warns on the resulting conflict), which leaves the env unimportable.
     {
       method: "shell.run",
       params: {
@@ -42,8 +46,7 @@ module.exports = {
           python: "3.12"
         },
         message: [
-          "pip install app/services/sam/sam3",
-          "pip install -r app/services/sam/requirements.txt"
+          "pip install -r app/services/sam/requirements.txt app/services/sam/sam3"
         ]
       }
     },
