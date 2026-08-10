@@ -2,7 +2,7 @@
 // Mirrors the directories created by install.js and sam_install.js.
 module.exports = {
   run: [
-    // Main Python venv
+    // Main Python env (conda/3.11 on Windows, uv venv/3.10 on Linux)
     { method: "fs.rm", params: { path: "app/env" } },
     // SAM 3.1 Python 3.12 conda env
     { method: "fs.rm", params: { path: "app/services/sam/env" } },

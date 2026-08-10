@@ -80,7 +80,6 @@ _NVFP4_SPLIT_FIELDS = {
 }
 
 _NVFP4_BACKEND = os.environ.get("WGP_NVFP4_BACKEND", _NVFP4_BACKEND_AUTO).strip().lower()
-_NVFP4_BACKEND = _NVFP4_BACKEND_LIGHTX2V
 
 def _normalize_nvfp4_backend(name):
     if name is None:

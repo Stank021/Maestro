@@ -55,6 +55,16 @@ module.exports = {
       message: "git clone --depth 1 --branch v1.0.0 https://github.com/Blizaine/maestro-seedvc app/postprocessing/seedvc"
     }
   }, {
+    // Windows: Python 3.11 conda env. Linux: original uv venv. See install.js.
+    when: "{{platform === 'win32'}}",
+    method: "shell.run",
+    params: {
+      conda: { path: "env" },
+      path: "app",
+      message: "uv pip install -r requirements.txt"
+    }
+  }, {
+    when: "{{platform !== 'win32'}}",
     method: "shell.run",
     params: {
       venv: "env",
@@ -63,12 +73,12 @@ module.exports = {
     }
   }, {
     // Skip torch.js when the marker file written by torch.js's last
-    // successful run is still present — `torch + triton + sage + flash`
+    // successful run is still present — `torch + triton + sage + flash + NVFP4/nunchaku kernels`
     // are already installed at the versions torch.js wants to install.
     // Saves ~60-120s + ~3 GB of redundant downloads on routine updates.
     //
     // When bumping ANY of those package versions inside torch.js, ALSO
-    // bump the `_v1` suffix here AND in torch.js's fs.write step. The
+    // bump the `_v2` suffix here AND in torch.js's fs.write step. The
     // old marker becomes stale, this `!exists(new_marker)` gate evaluates
     // true on the next update, torch.js runs, and the new marker is
     // written. Old marker stays as harmless cruft until reset.js (which
@@ -77,22 +87,29 @@ module.exports = {
     // Recovery path: if torch ever ends up in a broken state (e.g. CPU
     // wheel installed where CUDA is expected) AND the marker is still
     // present, the user can manually delete
-    // `app/env/.maestro_torch_v1.installed` and re-run Update to force
+    // `app/env/.maestro_torch_v2.installed` and re-run Update to force
     // a full reinstall — or run Reset for a clean slate.
-    when: "{{!exists('app/env/.maestro_torch_v1.installed')}}",
+    when: "{{!exists('app/env/.maestro_torch_v2.installed')}}",
     method: "script.start",
     params: {
       uri: "torch.js",
       params: {
-        venv: "env",
-        path: "app",
-        xformers: true
+        path: "app"
       }
     }
   }, {
     // Mirror of the install.js GGUF-kernels step — idempotent, so
     // re-runs cheaply on every update. Catches existing installs
     // up to the new behavior without forcing a reinstall.
+    method: "shell.run",
+    when: "{{platform === 'win32'}}",
+    params: {
+      conda: { path: "env" },
+      path: "app",
+      message: "python scripts/install_gguf_kernels.py"
+    }
+  }, {
+    when: "{{platform !== 'win32'}}",
     method: "shell.run",
     params: {
       venv: "env",

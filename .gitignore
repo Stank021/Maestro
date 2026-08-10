@@ -98,3 +98,6 @@ app/plugins/wan2gp-lora-multipliers-ui/
 # Python bytecode (anywhere)
 __pycache__/
 app/wgp_config.json.bak
+
+# Rollback copy of the pre-CUDA-13 env, kept until the new stack is proven
+app/env.bak-*/

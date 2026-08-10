@@ -18,7 +18,10 @@ module.exports = async (kernel) => {
       {
         method: "shell.run",
         params: {
-          venv: "env",
+          // app/env is a conda env on Windows (Python 3.11, CUDA 13 kernels);
+          // Linux keeps the uv venv. conda.path resolves relative to `path`.
+          conda: kernel.platform === 'win32' ? { path: "env" } : undefined,
+          venv: kernel.platform === 'win32' ? undefined : "env",
           env: {
             SERVER_PORT: port
           },

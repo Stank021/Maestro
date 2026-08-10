@@ -21,7 +21,29 @@ module.exports = {
       method: "hf.login",
       params: { wait: false }
     },
+    // Windows uses a Python 3.11 conda env rather than a uv venv off Pinokio's
+    // base Python 3.10. Every accelerator wheel in the CUDA 13 stack — the
+    // lightx2v NVFP4 kernels, the GGUF llama.cpp kernels, nunchaku, flash-attn
+    // — is published cp311 only, and without them the quantized models fall
+    // back to slow Python paths. `conda.path` resolves relative to `path`, so
+    // this is app/env; Pinokio creates it if absent and activates it if not.
     {
+      when: "{{platform === 'win32'}}",
+      method: "shell.run",
+      params: {
+        conda: { path: "env", python: "3.11.14" },
+        path: "app",
+        message: [
+          "uv pip install -r requirements.txt --index-strategy unsafe-best-match",
+          "uv pip install hf-xet pip"
+        ]
+      }
+    },
+    // Linux keeps the original uv venv on Python 3.10: the published Linux
+    // sage/flash wheels are cp310-only and PyTorch has no CUDA 13 Linux wheels
+    // yet, so there is nothing to gain and an existing install to break.
+    {
+      when: "{{platform !== 'win32'}}",
       method: "shell.run",
       params: {
         venv: "env",
@@ -37,9 +59,7 @@ module.exports = {
       params: {
         uri: "torch.js",
         params: {
-          venv: "env",
-          path: "app",
-          xformers: true
+          path: "app"
         }
       }
     },
@@ -52,6 +72,16 @@ module.exports = {
     // and the default INT8 / BF16 variants don't use these kernels at
     // all. Idempotent on re-runs.
     {
+      when: "{{platform === 'win32'}}",
+      method: "shell.run",
+      params: {
+        conda: { path: "env" },
+        path: "app",
+        message: "python scripts/install_gguf_kernels.py"
+      }
+    },
+    {
+      when: "{{platform !== 'win32'}}",
       method: "shell.run",
       params: {
         venv: "env",

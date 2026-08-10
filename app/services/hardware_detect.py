@@ -107,8 +107,18 @@ def _detect_kernel_support(gpu_cap: Optional[tuple]) -> dict:
     if major >= 12:
         try:
             import torch  # noqa: F401
-            has_kitchen = hasattr(getattr(__import__("torch").ops, "comfy_kitchen", None) or object(), "scaled_mm_nvfp4")
-            has_lightx2v = hasattr(getattr(__import__("torch").ops, "lightx2v_kernel", None) or object(), "cutlass_scaled_nvfp4_mm_sm120")
+            # Both extensions register their torch.ops entries as a side effect of
+            # being imported. Probing torch.ops without importing them first makes
+            # this check order-dependent — it reports False whenever detection runs
+            # before anything else has pulled the kernel in. Import them (optional,
+            # so failures are ignored) so the probe reflects what is installed.
+            for _kernel_mod in ("lightx2v_kernel", "comfy_kitchen.backends.cuda"):
+                try:
+                    __import__(_kernel_mod)
+                except Exception:
+                    pass
+            has_kitchen = hasattr(getattr(torch.ops, "comfy_kitchen", None) or object(), "scaled_mm_nvfp4")
+            has_lightx2v = hasattr(getattr(torch.ops, "lightx2v_kernel", None) or object(), "cutlass_scaled_nvfp4_mm_sm120")
             out["supports_nvfp4"] = bool(has_kitchen or has_lightx2v)
         except Exception:
             pass
