@@ -1,6 +1,6 @@
 # SAM 3.1 microservice dependencies
 # Installed in a Python 3.12+ conda env by sam_install.js
-# Note: torch/torchvision installed separately from cu128 index
+# Note: torch/torchvision installed separately from the cu130 index
 
 # SAM 3 core deps
 # numpy is capped below 2 to match sam3's own pin (numpy<2,>=1.26). Anything that
@@ -15,6 +15,7 @@ iopath>=0.1.10
 typing_extensions
 huggingface_hub
 psutil
+setuptools<81  # sam3 imports pkg_resources, removed from newer setuptools
 
 # SAM 3 runtime deps (listed as optional in pyproject.toml but imported at runtime)
 einops
@@ -25,7 +26,13 @@ opencv-python-headless<4.12   # 4.12+ is built against the NumPy 2 ABI
 # Triton (platform-specific)
 triton-windows; sys_platform == 'win32'
 triton; sys_platform == 'linux'
-xformers
+
+# NOTE: xformers is deliberately NOT installed. sam3 imports it behind a
+# try/except and only calls it for AttentionType.Xformer / .Sparse, but every
+# attn_type in sam3 defaults to AttentionType.Vanilla (torch SDPA), so the
+# xformers path is never taken. It also has no cu130 Windows wheel, and the
+# PyPI build ships no sm_120 kernels (TORCH_CUDA_ARCH_LIST 7.5/8.0+PTX/9.0a),
+# so it would PTX-JIT Ampere kernels on Blackwell anyway.
 
 # Microservice framework
 fastapi>=0.115.0

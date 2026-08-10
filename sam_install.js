@@ -20,7 +20,7 @@ module.exports = {
         message: "git pull"
       }
     },
-    // Step 2: Install PyTorch (CUDA 12.8) in a Python 3.12 conda env
+    // Step 2: Install PyTorch (CUDA 13.0) in a Python 3.12 conda env
     {
       method: "shell.run",
       params: {
@@ -29,7 +29,7 @@ module.exports = {
           python: "3.12"
         },
         message: [
-          "pip install torch torchvision \"numpy>=1.26,<2\" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple"
+          "pip install torch torchvision \"numpy>=1.26,<2\" --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple"
         ]
       }
     },
