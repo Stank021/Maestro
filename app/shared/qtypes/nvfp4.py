@@ -9,8 +9,10 @@ from optimum.quanto.tensor.qtype import qtype as _quanto_qtype, qtypes as _quant
 
 try:
     from torch._subclasses.fake_tensor import FakeTensor as _TorchFakeTensor
+    from torch._subclasses.fake_tensor import is_fake as _torch_is_fake
 except Exception:  # pragma: no cover
     _TorchFakeTensor = ()
+    _torch_is_fake = None
 
 def _maybe_add_nvfp4_cu13_dll_dir():
     if os.name != "nt":
@@ -272,6 +274,14 @@ _init_nvfp4_kernel_support()
 
 
 def _is_fake_tensor(tensor):
+    # AOTAutograd traces with FunctionalTensor wrappers around FakeTensors, and
+    # those fail a plain isinstance(FakeTensor) check. Use torch's own helper,
+    # which unwraps functional / traceable-subclass tensors before deciding.
+    if _torch_is_fake is not None and torch.is_tensor(tensor):
+        try:
+            return _torch_is_fake(tensor)
+        except Exception:
+            pass
     return isinstance(tensor, _TorchFakeTensor)
 
 
@@ -1045,6 +1055,15 @@ class QLinearNVFP4(QModuleMixin, torch.nn.Linear):
             return self.weight
         return super().qweight
 
+    # Keep the whole quantized linear opaque to Dynamo, exactly like the
+    # Nunchaku FP4 module does. Without this, Dynamo traces into the layer and
+    # emits a plain `linear` node; AOTAutograd then re-executes that node with
+    # fake tensors, which drops us into the eager NVFP4 path at trace time --
+    # reporting a spurious "linear fallback" and then failing to compile.
+    # Breaking the graph here runs the layer eagerly, so the LightX2V/Comfy
+    # kernel is used as intended and Inductor still compiles the surrounding
+    # transformer blocks.
+    @torch.compiler.disable()
     def forward(self, input: torch.Tensor) -> torch.Tensor:
         pre_quant_scale = getattr(self, "pre_quant_scale", None)
         if not torch.is_tensor(pre_quant_scale):
