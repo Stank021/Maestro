@@ -1,15 +1,18 @@
-const path = require('path')
+const { isRtx50, runtimeProfile } = require("./launcher_profile")
 module.exports = {
   version: "8.0",
   title: "Maestro",
   description: "An all-in-one, 100% local AI video, image & music studio. Its Director mode turns a single prompt into a full music video or short film — LLM-planned, shot by shot. Built on the WanGP pipeline (Wan 2.1/2.2, LTX-2.3, Qwen, Hunyuan Video, Flux). Requires an NVIDIA GPU (6GB+ VRAM).",
   icon: "maestro_simplified_icon_alpha.png",
   menu: async (kernel, info) => {
+    const runtime = runtimeProfile(kernel)
+    const rtx50 = isRtx50(kernel)
     // Do not gate this menu on kernel.gpu. Pinokio can render an app menu
     // before its hardware inventory has populated that property, which would
     // hide Start from supported systems. install.js retains the documented
     // execution-time NVIDIA check for fresh installations.
-    let installed = info.exists("app/env")
+    let installed = info.exists("app/env") || info.exists("app/env-rtx50")
+    let runtimeReady = info.exists(runtime.marker)
     let running = {
       install: info.running("install.js"),
       start: info.running("start.js"),
@@ -24,6 +27,19 @@ module.exports = {
         text: "Installing",
         href: "install.js",
       }]
+    } else if (running.update) {
+      return [{
+        default: true,
+        icon: 'fa-solid fa-terminal',
+        text: "Updating",
+        href: "update.js",
+      }]
+    // Upstream gates the menu here on an env-rtx50 runtime marker and offers
+    // "Finish RTX 50 Runtime Upgrade" until it exists. This install keeps the
+    // local conda runtime at app/env (Python 3.11 / CUDA 13), which upstream's
+    // profile does not know about, so that gate would hide Start behind an
+    // env rebuild we deliberately declined. Drop the branch while the local
+    // launcher scripts own the runtime.
     } else if (installed) {
       if (running.start) {
         let local = info.local("start.js")
@@ -69,13 +85,6 @@ module.exports = {
             href: "start_classic.js",
           }]
         }
-      } else if (running.update) {
-        return [{
-          default: true,
-          icon: 'fa-solid fa-terminal',
-          text: "Updating",
-          href: "update.js",
-        }]
       } else if (running.reset) {
         return [{
           default: true,
