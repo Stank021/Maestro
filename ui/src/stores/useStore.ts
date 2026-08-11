@@ -1442,6 +1442,11 @@ interface AppState {
   sidebarMode: 'director' | 'studio'
   directorStep: 'upload' | 'analyze' | 'structure' | 'style' | 'plan' | 'review' | 'generate_images' | 'plan_video' | 'review_video'
   directorAudioFile: File | null
+  /** The song's real written lyrics, pasted or loaded from a .txt on the
+   *  upload step. Optional. Seeds Whisper and then hard-aligns the timed
+   *  transcription to these words, so proper nouns and the hook survive
+   *  into the clip prompts instead of arriving as mondegreens. */
+  directorKnownLyrics: string
   directorAudioPath: string | null
   directorAnalysis: AudioAnalysisResult | null
   directorPlannedClips: PlannedClip[]
@@ -1516,6 +1521,7 @@ interface AppState {
   setSidebarMode: (mode: 'director' | 'studio') => void
   directorSetSpeakerMapping: (speakerId: string, name: string, role: SpeakerMapping['role']) => void
   directorInsertSpeakerMention: (speakerId: string) => void
+  setDirectorKnownLyrics: (v: string) => void
   directorUploadAndAnalyze: (file: File) => Promise<void>
   // Music Video: generate-the-track source + song setup
   directorMusicSource: 'upload' | 'generate' | null
@@ -6193,6 +6199,7 @@ export const useStore = create<AppState>((set, get) => ({
   sidebarMode: 'studio' as const,
   directorStep: 'upload',
   directorAudioFile: null,
+  directorKnownLyrics: '',
   directorAudioPath: null,
   directorAnalysis: null,
   directorPlannedClips: [],
@@ -6393,6 +6400,8 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  setDirectorKnownLyrics: (v) => set({ directorKnownLyrics: v }),
+
   directorUploadAndAnalyze: async (file) => {
     set({
       directorLoading: true,
@@ -6403,7 +6412,15 @@ export const useStore = create<AppState>((set, get) => ({
     })
     try {
       const uploaded = await api.uploadAudio(file)
-      await get().directorAnalyzeAndPlan(uploaded.path, { transcribe: true })
+      // Known lyrics, when the user pasted or loaded them on the upload
+      // step. The generate-a-track flow already passed this (it knows what
+      // ACE-Step sang); uploads went in blind, so Whisper's mondegreens
+      // became the planner's imagery — "Galatea keeps the voltage" heard
+      // as "the make-up keeps the voltage" is a different music video.
+      await get().directorAnalyzeAndPlan(uploaded.path, {
+        transcribe: true,
+        lyricsHint: get().directorKnownLyrics.trim() || undefined,
+      })
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Upload failed'
       console.error('Director upload failed:', e)

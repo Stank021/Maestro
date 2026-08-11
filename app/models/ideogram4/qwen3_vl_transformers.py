@@ -973,7 +973,13 @@ class Qwen3VLVisionModel(Qwen3VLPreTrainedModel):
         hidden_states = self.patch_embed(hidden_states)
 
         pos_embeds = self.fast_pos_embed_interpolate(grid_thw)
-        hidden_states = hidden_states + pos_embeds
+        # Keep positional embeddings from promoting half-precision vision
+        # activations to float32 before the first LayerNorm. MiniMax H3 loads
+        # this tower in fp16 under MMGP.
+        hidden_states = hidden_states + pos_embeds.to(
+            device=hidden_states.device,
+            dtype=hidden_states.dtype,
+        )
 
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
 

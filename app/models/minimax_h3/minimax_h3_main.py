@@ -653,6 +653,19 @@ class MiniMaxH3Model:
     def patch_size(self) -> tuple[int, int, int]:
         return tuple(self.transformer.config.patch_size)
 
+    # Patched by Neris 2026-08-08 - same class of bug as conditioner.py's hardcoded
+    # float32: the video VAE is loaded at float16 (_load_video_vae), and mmgp only
+    # uses _model_dtype at pin time, it does not cast module inputs. Normalized
+    # pixels must therefore be handed to _encode_clip/_encode in the VAE's own dtype.
+    def _vae_dtype(self) -> torch.dtype:
+        dtype = getattr(self.vae, "_model_dtype", None)
+        if dtype is not None:
+            return dtype
+        for parameter in self.vae.parameters():
+            if parameter.dtype != torch.uint8:
+                return parameter.dtype
+        return torch.float32
+
     def _encode_keyframes(
         self,
         images: list[Image.Image],
@@ -673,7 +686,7 @@ class MiniMaxH3Model:
                 return None
             pixels = torch.from_numpy(np.array(image, dtype=np.uint8)).to(self.device)
             pixels = pixels.permute(2, 0, 1)[None, :, None]
-            pixels = (pixels.float().div(255.0) - pixel_mean) / pixel_std
+            pixels = ((pixels.float().div(255.0) - pixel_mean) / pixel_std).to(self._vae_dtype())
             moments = self.vae._encode_clip(pixels)
             posterior = DiagonalGaussianDistribution(moments)
             encoded = posterior.sample(generator=torch.Generator().manual_seed(MINIMAX_H3_KEYFRAME_ENCODE_SEED))
@@ -724,7 +737,7 @@ class MiniMaxH3Model:
                     usable_frames = trim_reference_num_frames(reference.frames.shape[0])
                     frames = reference.frames[:usable_frames]
                     pixels = torch.from_numpy(frames.copy()).to(self.device).permute(3, 0, 1, 2)[None]
-                pixels = (pixels.to(torch.float32).div(255.0) - pixel_mean) / pixel_std
+                pixels = ((pixels.to(torch.float32).div(255.0) - pixel_mean) / pixel_std).to(self._vae_dtype())
                 moments = (
                     self.vae._encode_clip(pixels)
                     if reference.kind == "image"

@@ -173,6 +173,47 @@ class MiniMaxH3Conditioner(nn.Module):
     def visual(self):
         return self.qwen.visual
 
+    def _visual_dtype(self) -> torch.dtype:
+        visual = self.qwen.visual
+        blocks = getattr(visual, "blocks", None)
+        if blocks:
+            first_block = blocks[0]
+            for module_name in ("norm1", "norm2"):
+                module = getattr(first_block, module_name, None)
+                weight = getattr(module, "weight", None)
+                if weight is not None and weight.dtype.is_floating_point:
+                    return weight.dtype
+        merger_norm = getattr(getattr(visual, "merger", None), "norm", None)
+        merger_weight = getattr(merger_norm, "weight", None)
+        if merger_weight is not None and merger_weight.dtype.is_floating_point:
+            return merger_weight.dtype
+        dtype = getattr(self.qwen.visual, "_model_dtype", None)
+        if dtype is not None:
+            return dtype
+        for parameter in visual.parameters():
+            if parameter.dtype.is_floating_point:
+                return parameter.dtype
+        return torch.float32
+
+    def _visual_autocast_dtype(self) -> torch.dtype:
+        proj = getattr(getattr(self.qwen.visual, "patch_embed", None), "proj", None)
+        weight = getattr(proj, "weight", None)
+        if weight is not None and weight.dtype in (torch.float16, torch.bfloat16):
+            return weight.dtype
+        return torch.float16
+
+    def _run_visual(self, pixels: torch.Tensor, grid: torch.Tensor):
+        # The GGUF checkpoint is intentionally mixed precision: patch_embed and
+        # the attention/MLP weights are half precision while every LayerNorm
+        # stays FP32, and the tower re-casts its own input to the patch_embed
+        # dtype (Qwen3VLVisionPatchEmbed.forward). No input cast can reconcile
+        # the two halves, so run the tower under autocast: matmuls keep the
+        # checkpoint's half precision and the FP32 norms execute in FP32.
+        if pixels.device.type == "cuda":
+            with torch.autocast("cuda", dtype=self._visual_autocast_dtype()):
+                return self.qwen.visual(pixels, grid_thw=grid)
+        return self.qwen.visual(pixels, grid_thw=grid)
+
     def _plain_inputs(self, prompt: str, device: torch.device):
         encoded = self.tokenizer(
             prompt,
@@ -290,9 +331,9 @@ class MiniMaxH3Conditioner(nn.Module):
         image_mask = video_mask = None
         image_deepstack = video_deepstack = None
         if pixel_values is not None:
-            image_embeds, image_deepstack = self.qwen.visual(
-                pixel_values.to(device=device, dtype=torch.float32),
-                grid_thw=image_grid_thw.to(device),
+            image_embeds, image_deepstack = self._run_visual(
+                pixel_values.to(device=device, dtype=self._visual_dtype()),
+                image_grid_thw.to(device),
             )
             if image_embeds is None or self._interrupt:
                 return None, None
@@ -302,9 +343,9 @@ class MiniMaxH3Conditioner(nn.Module):
                 image_embeds.to(inputs_embeds.dtype),
             )
         if pixel_values_videos is not None:
-            video_embeds, video_deepstack = self.qwen.visual(
-                pixel_values_videos.to(device=device, dtype=torch.float32),
-                grid_thw=video_grid_thw.to(device),
+            video_embeds, video_deepstack = self._run_visual(
+                pixel_values_videos.to(device=device, dtype=self._visual_dtype()),
+                video_grid_thw.to(device),
             )
             if video_embeds is None or self._interrupt:
                 return None, None
@@ -349,8 +390,8 @@ class MiniMaxH3Conditioner(nn.Module):
         if images:
             input_ids, attention_mask, position_ids, processor_inputs = self._vision_inputs(prompt, images, device)
             grid = processor_inputs["image_grid_thw"]
-            pixels = processor_inputs["pixel_values"].to(device=device, dtype=torch.float32)
-            image_embeds, deepstack = self.qwen.visual(pixels, grid_thw=grid)
+            pixels = processor_inputs["pixel_values"].to(device=device, dtype=self._visual_dtype())
+            image_embeds, deepstack = self._run_visual(pixels, grid)
             if image_embeds is None or self._interrupt:
                 return None, None
             inputs_embeds = self.qwen.model.embed_tokens(input_ids)
