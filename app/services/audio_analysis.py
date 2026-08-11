@@ -285,6 +285,158 @@ def _clean_lyrics_hint(lyrics: Optional[str]) -> Optional[str]:
     return " ".join(words[:150])
 
 
+# Tuned by Neris - 2026-08-10.
+# Structure tags to strip from a pasted lyric sheet before alignment.
+# Covers ACE-Step's bracketed control tokens plus the section headings a
+# human writes in a plain .txt ("Verse 1", "Pre-Chorus 2", "Bridge"), the
+# parenthesised performance note at the top, and the ⸻ dividers.
+_LYRIC_SECTION_RE = re.compile(
+    r"^\s*(?:\[[^\]]*\]|\((?:[^)]{0,120})\)|(?:final\s+|pre[-\s]?)?"
+    r"(?:verse|chorus|bridge|intro|outro|hook|refrain|interlude|instrumental|"
+    r"breakdown|drop|coda|tag)\s*\d*\s*|[⸺⸻—―-]{2,})\s*$",
+    re.IGNORECASE,
+)
+_LYRIC_WORD_RE = re.compile(r"[0-9a-zÀ-ɏ']+")
+
+
+def _lyric_words(lyrics: str) -> Tuple[List[str], List[str]]:
+    """Split a pasted lyric sheet into (display, normalized) word lists.
+
+    display keeps the author's casing, punctuation and spelling — it is
+    what ends up in the timed segments. normalized is lowercased and
+    stripped to letters/digits/apostrophes, and is what the aligner
+    matches against Whisper's output. The two lists stay index-aligned;
+    a token that normalizes to nothing (a lone dash, a quote mark) is
+    dropped from both rather than desyncing them.
+    """
+    display: List[str] = []
+    norm: List[str] = []
+    for line in lyrics.splitlines():
+        if _LYRIC_SECTION_RE.match(line):
+            continue
+        for token in line.split():
+            key = "".join(_LYRIC_WORD_RE.findall(token.lower().replace("’", "'")))
+            if not key:
+                continue
+            display.append(token)
+            norm.append(key)
+    return display, norm
+
+
+def _align_to_known_lyrics(
+    segments: List["LyricSegment"], lyrics: str
+) -> List["LyricSegment"]:
+    """Replace Whisper's misheard words with the author's real ones.
+
+    Whisper's initial_prompt is only a soft prior over the FIRST ~30s
+    window, so on a 4-minute song the later verses drift back to
+    mondegreens — observed on this box: "Galatea keeps the voltage" →
+    "the make-up keeps the voltage", and the six-times hook "patch
+    notes" → "patch nuts". Proper nouns are the first casualty and they
+    are exactly what a music video needs, since the planner turns lyric
+    text into per-clip imagery.
+
+    So: keep Whisper for TIMING (which is what it is good at) and take
+    the WORDS from the sheet. Both word streams are aligned once with
+    difflib; each segment's hypothesis span maps to a span of real
+    lyric words, which becomes its new text.
+
+    Two guards, because a wrong sheet must not silently overwrite a
+    right transcript:
+      - global similarity < 0.30 → the sheet isn't this song, return
+        the transcript untouched.
+      - per-segment similarity < 0.45 → leave that segment alone. This
+        is what protects ad-libs, repeated choruses the sheet writes
+        once, and the instrumental tail.
+    """
+    from difflib import SequenceMatcher
+
+    ref_display, ref_norm = _lyric_words(lyrics)
+    if len(ref_norm) < 8 or not segments:
+        return segments
+
+    hyp_norm: List[str] = []
+    spans: List[Tuple[int, int]] = []  # per segment: [start, end) into hyp_norm
+    for seg in segments:
+        start = len(hyp_norm)
+        for token in seg.text.split():
+            key = "".join(_LYRIC_WORD_RE.findall(token.lower().replace("’", "'")))
+            if key:
+                hyp_norm.append(key)
+        spans.append((start, len(hyp_norm)))
+    if len(hyp_norm) < 8:
+        return segments
+
+    matcher = SequenceMatcher(None, hyp_norm, ref_norm, autojunk=False)
+    ratio = matcher.ratio()
+    if ratio < 0.30:
+        print(
+            f"[AudioAnalysis] Lyric sheet does not match this audio "
+            f"(similarity {ratio:.2f}) - keeping the transcription as heard"
+        )
+        return segments
+
+    # hyp index -> ref index, interpolated inside each opcode block so a
+    # segment boundary that lands mid-block still gets a sane ref offset.
+    hyp_to_ref = [0] * (len(hyp_norm) + 1)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        for i in range(i1, i2):
+            if tag == "delete" or j2 == j1:
+                hyp_to_ref[i] = j1
+            else:
+                hyp_to_ref[i] = j1 + ((i - i1) * (j2 - j1)) // max(1, i2 - i1)
+    hyp_to_ref[len(hyp_norm)] = len(ref_norm)
+
+    corrected = [False] * len(segments)
+    fixed = 0
+    for idx, (seg, (a, b)) in enumerate(zip(segments, spans)):
+        if b <= a:
+            continue
+        rs, re_ = hyp_to_ref[a], hyp_to_ref[b]
+        if re_ <= rs:
+            continue
+        local = SequenceMatcher(None, hyp_norm[a:b], ref_norm[rs:re_]).ratio()
+        if local < 0.45:
+            continue
+        text = " ".join(ref_display[rs:re_]).strip()
+        if text and text != seg.text:
+            seg.text = text
+            corrected[idx] = True
+            fixed += 1
+
+    # Backfill the worst lines. A segment Whisper mangled BEYOND 0.45
+    # similarity is the one that most needs the sheet — but it is also
+    # the one the guard above refuses, so the garbage survives. Observed:
+    # "Dana holds the vow-line tight" came back as "Dating holes, they
+    # voline tight" (0.4) and stayed wrong while its cleaner neighbours
+    # were repaired.
+    #
+    # A segment fenced between two CORRECTED neighbours is safe to fill:
+    # both its boundaries are anchored to confident matches, so the ref
+    # span between them is the right span by construction, however badly
+    # the audio was heard. Segments without that fence — the outro's
+    # repeated ad-libs, the instrumental tail — are left exactly as heard,
+    # which is what keeps a chorus the sheet writes once from being
+    # stamped over every repeat of it.
+    for idx in range(1, len(segments) - 1):
+        if corrected[idx] or not (corrected[idx - 1] and corrected[idx + 1]):
+            continue
+        a, b = spans[idx]
+        rs, re_ = hyp_to_ref[a], hyp_to_ref[b]
+        if re_ <= rs or b <= a:
+            continue
+        text = " ".join(ref_display[rs:re_]).strip()
+        if text and text != segments[idx].text:
+            segments[idx].text = text
+            fixed += 1
+
+    print(
+        f"[AudioAnalysis] Aligned transcription to the supplied lyrics "
+        f"(similarity {ratio:.2f}, {fixed}/{len(segments)} segments corrected)"
+    )
+    return segments
+
+
 def _transcribe(audio_path: str, lyrics_hint: Optional[str] = None) -> List[LyricSegment]:
     model = _get_whisper_model()
     initial_prompt = _clean_lyrics_hint(lyrics_hint)
@@ -308,6 +460,8 @@ def _transcribe(audio_path: str, lyrics_hint: Optional[str] = None) -> List[Lyri
                 end=round(seg.end, 3),
                 text=text,
             ))
+    if lyrics_hint:
+        lyrics = _align_to_known_lyrics(lyrics, lyrics_hint)
     return lyrics
 
 

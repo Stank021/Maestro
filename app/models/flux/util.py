@@ -1009,11 +1009,17 @@ def preprocess_flux_state_dict(state_dict: dict) -> dict:
     # (float8_e4m3fn / float8_e5m2). The Flux loader must split the fused QKV via
     # offload.split_linear_modules(), which cannot operate on fp8 weights and
     # fails with "Unable to rebuild quantized weight ... missing ['weight']".
-    # Widen any fp8 tensors to bf16 before the model is built/split — bf16 covers
+    # Widen fp8 tensors to bf16 before the model is built/split — bf16 covers
     # the fp8 value range so this is lossless, the QKV split then works, and the
     # model can still be re-quantized to int8 at load time (auto_quantize).
+    # Only actual weights/biases are widened: NVFP4 checkpoints keep their packed
+    # uint8 weights next to fp8 block scales ('*.weight_scale'), and widening those
+    # scales makes shared.qtypes.nvfp4 fail to recognize the checkpoint, so the
+    # packed weights end up loaded into unquantized Linear layers.
     if _FP8_DTYPES:
         for k, v in sd.items():
+            if not (k.endswith(".weight") or k.endswith(".bias")):
+                continue
             if torch.is_tensor(v) and v.dtype in _FP8_DTYPES:
                 sd[k] = v.to(torch.bfloat16)
     return sd

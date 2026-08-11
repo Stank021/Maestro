@@ -15,6 +15,12 @@ import type { DirectorPipelineType, DirectorShotImageGuidance, DirectorSkill, Mo
 // the soundtrack analyzed without converting first.
 const AUDIO_ACCEPT = '.wav,.mp3,.flac,.ogg,.m4a,.mp4,.mov,.mkv,.webm,.avi,.m4v'
 const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.webp,.bmp'
+// A lyric sheet dropped on the same zone as the song. Whisper mishears sung
+// vocals — proper nouns worst of all — and the planner turns lyric text into
+// per-clip imagery, so a mondegreen becomes a wrong shot. Handing over the
+// written words is the fix, and dropping the .txt you already have beats
+// pasting it.
+const LYRICS_ACCEPT = '.txt,.lrc,.md'
 
 function directorWillGenerateShotImages(
   support: 'required' | 'optional' | 'direct_references' | undefined,
@@ -389,6 +395,8 @@ export function DirectorChat() {
   const clipImages = useStore(s => s.directorClipImages)
   const imageGenProgress = useStore(s => s.directorImageGenProgress)
   const uploadAndAnalyze = useStore(s => s.directorUploadAndAnalyze)
+  const knownLyrics = useStore(s => s.directorKnownLyrics)
+  const setKnownLyrics = useStore(s => s.setDirectorKnownLyrics)
   const setEnergyBias = useStore(s => s.directorSetEnergyBias)
   const confirmStructure = useStore(s => s.directorConfirmStructure)
   const setSceneDescription = useStore(s => s.directorSetSceneDescription)
@@ -492,6 +500,16 @@ export function DirectorChat() {
   const atStep = (s: DirectorStep) => step === s
 
   const handleFile = useCallback((file: File) => {
+    // A lyric sheet dropped on the same zone as the song — checked first
+    // since .txt/.lrc/.md never match the audio MIME/extension checks
+    // below, so without this branch a dropped lyric sheet just silently
+    // did nothing.
+    const lyricsExtOk = !isShortFilm
+      && LYRICS_ACCEPT.split(',').some(ext => file.name.toLowerCase().endsWith(ext))
+    if (lyricsExtOk) {
+      file.text().then(setKnownLyrics)
+      return
+    }
     // Accept audio/* MIME OR video/* MIME (backend extracts the audio
     // track from video) OR a matching file extension. Some browsers /
     // OSes don't set MIME on drag-drop, so the extension fallback is
@@ -506,7 +524,7 @@ export function DirectorChat() {
     } else {
       uploadAndAnalyze(file)
     }
-  }, [uploadAndAnalyze, shortFilmUploadAndAnalyze, isShortFilm])
+  }, [uploadAndAnalyze, shortFilmUploadAndAnalyze, isShortFilm, setKnownLyrics])
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -722,16 +740,35 @@ export function DirectorChat() {
                   {!isShortFilm && musicSource === 'generate' ? (
                     !loading && <DirectorSongSetup />
                   ) : (
-                    <UploadZone
-                      dragOver={dragOver}
-                      setDragOver={setDragOver}
-                      handleDrop={handleDrop}
-                      handleFile={handleFile}
-                      loading={loading && atStep('analyze')}
-                      loadingMessage={loadingMessage}
-                      audioFile={audioFile}
-                      isShortFilm={isShortFilm}
-                    />
+                    <>
+                      {!isShortFilm && (
+                        <div>
+                          <label className="text-[11px] text-text-muted mb-1 block">
+                            Known lyrics (optional) — paste them, or drag a
+                            .txt/.lrc/.md lyric sheet onto the drop zone below,
+                            to keep the transcription from guessing them
+                          </label>
+                          <textarea
+                            value={knownLyrics}
+                            onChange={e => setKnownLyrics(e.target.value)}
+                            disabled={loading}
+                            rows={3}
+                            placeholder="Paste the song's actual lyrics here before uploading…"
+                            className="w-full bg-bg-secondary border border-border rounded px-2 py-1.5 text-xs text-text-primary resize-none focus:outline-none focus:border-accent-blue transition-colors disabled:opacity-60"
+                          />
+                        </div>
+                      )}
+                      <UploadZone
+                        dragOver={dragOver}
+                        setDragOver={setDragOver}
+                        handleDrop={handleDrop}
+                        handleFile={handleFile}
+                        loading={loading && atStep('analyze')}
+                        loadingMessage={loadingMessage}
+                        audioFile={audioFile}
+                        isShortFilm={isShortFilm}
+                      />
+                    </>
                   )}
                   {/* Music Video: up-front options (LoRA + post-processing) live
                       here at the first step instead of buried mid-flow. */}

@@ -287,8 +287,16 @@ MODEL_REGISTRY = {
         # Qwen3.6 inherits Qwen3.5's 256k native context. Note: full 256k
         # context is the dominant VRAM cost here — that single -c flag
         # alone allocates ~15 GB of KV cache even with q4_0 quantization.
+        # Tuned by Fable - 2026-08-09: enhancer sessions never approach 256k
+        # (frame caption + 50-line prompt ≈ 4-6k tokens incl. image tokens),
+        # so -c 16384 removes all long-context cost. -ngl 20 pinned because
+        # weights are 15.4 GB vs ~10 GB free on the 16 GB 5080 (desktop holds
+        # ~6 GB); without it the launcher falls through to -ngl -1 (all 48
+        # layers) and the driver spills to sysmem = slideshow. 20 is a safe
+        # floor at ~0.32 GB/layer; sweep upward if free VRAM allows.
         "extra_flags": [
-            "-c", "262144",
+            "-c", "16384",
+            "-ngl", "20",
             "-np", "1",
             "-fa", "on",
             "--cache-type-k", "q4_0",
