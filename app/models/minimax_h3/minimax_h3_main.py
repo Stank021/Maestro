@@ -242,6 +242,57 @@ def _tensor_to_pil(image) -> Image.Image | None:
     return Image.fromarray(pixels).convert("RGB")
 
 
+_HANDOFF_DAMPING_ENV = "MAESTRO_H3_HANDOFF_DAMPING"
+
+
+def _handoff_damping_strength() -> float:
+    """Read the boundary-frame damping strength (0 disables, 0.2-0.3 is a sane trial)."""
+
+    try:
+        value = float(os.environ.get(_HANDOFF_DAMPING_ENV, "0") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(max(value, 0.0), 1.0)
+
+
+def _damp_high_frequencies(frame: torch.Tensor, strength: float) -> torch.Tensor:
+    """Blend a (C, 1, H, W) boundary frame toward a blurred copy.
+
+    Each H3 window re-derives its whole look from this single decoded frame, so
+    any high-frequency artefact it carries is treated as real detail and gets
+    re-amplified by the next pass. Measured over an eight-window take that loop
+    multiplies edge energy roughly six-fold and turns skin into brush strokes.
+    Damping the handoff a little breaks the feedback path; the model still
+    re-synthesises genuine detail from the prompt and the conditioning.
+    """
+
+    if strength <= 0 or frame is None:
+        return frame
+    working = frame.float()
+    blurred = torch.nn.functional.avg_pool2d(
+        working[:, 0], kernel_size=3, stride=1, padding=1
+    ).unsqueeze(1)
+    return (working * (1.0 - strength) + blurred * strength).to(frame.dtype)
+
+
+def _match_colors_to_reference(video, reference, strength: float):
+    """Match a decoded window back to the opening window's colour grade."""
+
+    if strength <= 0 or reference is None:
+        return video
+    try:
+        from ..wan.multitalk.multitalk_utils import match_and_blend_colors
+    except Exception as exc:  # pragma: no cover - optional dependency path
+        print(f"[MiniMax H3] Colour correction unavailable ({exc}); window left uncorrected.")
+        return video
+    try:
+        ref = reference.to(device=video.device, dtype=video.dtype)
+        return match_and_blend_colors(video, ref, strength)
+    except Exception as exc:
+        print(f"[MiniMax H3] Colour correction failed ({exc}); window left uncorrected.")
+        return video
+
+
 def _last_continuation_frame(input_video, prefix_frames_count: int):
     """Return the final committed frame supplied by the window engine."""
 
@@ -259,7 +310,8 @@ def _last_continuation_frame(input_video, prefix_frames_count: int):
     if prefix_frames_count <= 0:
         return None
     frame_index = min(prefix_frames_count, int(continuation.shape[1])) - 1
-    return continuation[:, frame_index : frame_index + 1]
+    frame = continuation[:, frame_index : frame_index + 1]
+    return _damp_high_frequencies(frame, _handoff_damping_strength())
 
 
 def _strip_transformer_wrappers(
@@ -1047,6 +1099,28 @@ class MiniMaxH3Model:
         pixel_mean = torch.tensor(MINIMAX_H3_PIXEL_MEAN, device=self.device).view(1, -1, 1, 1, 1)
         pixel_std = torch.tensor(MINIMAX_H3_PIXEL_STD, device=self.device).view(1, -1, 1, 1, 1)
         video = (video.float() * pixel_std + pixel_mean).clamp(0, 1).mul(2).sub(1)
+
+        # Anchor every continuation window to the grade of the take's opening
+        # window. Matching against the previous window instead would let the
+        # drift ratchet forward, since that reference has already shifted.
+        if not self.omni_reference:
+            try:
+                color_strength = float(_kwargs.get("color_correction_strength", 0) or 0)
+            except (TypeError, ValueError):
+                color_strength = 0.0
+            color_strength = min(max(color_strength, 0.0), 1.0)
+            reference_size = (int(height), int(width))
+            if int(prefix_frames_count or 0) <= 0:
+                self._color_reference = video[:, :, :1].detach().to("cpu").clone()
+                self._color_reference_size = reference_size
+            elif (
+                color_strength > 0
+                and getattr(self, "_color_reference", None) is not None
+                and getattr(self, "_color_reference_size", None) == reference_size
+            ):
+                video = _match_colors_to_reference(
+                    video, self._color_reference, color_strength
+                )
 
         audio_latents = unpack_audio_tokens(
             audio_rows[layout.num_condition_audio_rows :],

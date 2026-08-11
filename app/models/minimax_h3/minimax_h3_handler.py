@@ -1016,6 +1016,12 @@ class family_handler:
             "sliding_window_trim_to_requested": not omni_reference,
             "sliding_window_end_image_at_final": not omni_reference,
             "sliding_window_auto_prompt_pacing": not omni_reference,
+            # H3 chains windows through a decoded boundary frame, so every pass
+            # re-derives its grade from an image that already went through a VAE
+            # round trip. Exposing the colour-correction slider lets each new
+            # window be matched back to the first window's grade, which stops the
+            # brightness / saturation ratchet compounding over a long take.
+            "color_correction": not omni_reference,
             # Director renders H3 as independent native-duration shots rather
             # than pretending it supports the rolling-window contract.
             "director_video_strategy": (
@@ -1222,6 +1228,7 @@ class family_handler:
                 ),
                 "sliding_window_overlap": 0 if omni_reference else 1,
                 "sliding_window_discard_last_frames": 0,
+                "sliding_window_color_correction_strength": 0 if omni_reference else 0.5,
                 "skip_steps_cache_type": "",
                 "skip_steps_multiplier": 0.08,
                 "skip_steps_start_step_perc": 25,
@@ -1374,7 +1381,17 @@ class family_handler:
 
         inputs["sliding_window_discard_last_frames"] = 0
         inputs["sliding_window_overlap_noise"] = 0
-        inputs["sliding_window_color_correction_strength"] = 0
+        if omni_reference:
+            # Single pass, nothing to match against.
+            inputs["sliding_window_color_correction_strength"] = 0
+        else:
+            try:
+                strength = float(
+                    inputs.get("sliding_window_color_correction_strength", 0) or 0
+                )
+            except (TypeError, ValueError):
+                strength = 0.0
+            inputs["sliding_window_color_correction_strength"] = min(max(strength, 0.0), 1.0)
         try:
             detected_vram_gb = (
                 torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
