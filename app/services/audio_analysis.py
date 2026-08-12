@@ -569,6 +569,33 @@ def get_diarizer_pipeline(profile: str = "speech"):
         print(f"[Diarization] Skipped (missing dependency): {e}")
         return None
 
+    # torchaudio 2.10 (the CUDA 13 stack) dropped torchaudio.AudioMetaData,
+    # but pyannote.audio still names it in a return annotation in
+    # pyannote/audio/core/io.py. Python evaluates annotations at import time,
+    # so `import pyannote.audio` raises AttributeError before any audio is
+    # touched. The symbol is only ever used as a type hint, so a placeholder
+    # is enough to let the import through. Guarded by hasattr, so it becomes
+    # a no-op if a future torchaudio restores the real class.
+    # A second casualty: torchaudio 2.10 also removed list_audio_backends(),
+    # and pyannote indexes the result (core/io.py:214) — returning an empty
+    # list swaps the AttributeError for an IndexError, so name the backend
+    # pyannote would have found. soundfile is what it uses for file reads.
+    try:
+        import torchaudio
+        patched = []
+        if not hasattr(torchaudio, "AudioMetaData"):
+            class _AudioMetaDataShim:
+                """Annotation-only stand-in for the removed torchaudio class."""
+            torchaudio.AudioMetaData = _AudioMetaDataShim
+            patched.append("AudioMetaData")
+        if not hasattr(torchaudio, "list_audio_backends"):
+            torchaudio.list_audio_backends = lambda: ["soundfile"]
+            patched.append("list_audio_backends")
+        if patched:
+            print(f"[Diarization] Patched torchaudio {', '.join(patched)} for pyannote compatibility")
+    except Exception as e:
+        print(f"[Diarization] torchaudio shim skipped ({e}); pyannote may fail to import")
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     _base = os.path.dirname(os.path.abspath(__file__))
     _project_root = os.path.normpath(os.path.join(_base, "..", ".."))
@@ -915,13 +942,31 @@ def analyze(
             _set_progress("transcribing", "Transcribing audio")
             result.lyrics = _transcribe(transcription_path, lyrics_hint=lyrics_hint)
 
-            # Run speaker diarization on the original mix (needs both voices)
+            # Run speaker diarization on the original mix (needs both voices).
+            # Deliberately in its own try: diarization only ADDS speaker tags to
+            # lyrics that transcription already produced, so a failure here must
+            # not discard them. It used to share the outer handler, and when
+            # pyannote broke against torchaudio 2.10 (torchaudio.AudioMetaData
+            # was removed, pyannote still names it in a signature annotation)
+            # the outer except threw away a perfectly good transcript and logged
+            # a misleading "Transcription failed". Untagged lyrics still drive
+            # the vocal/instrumental split that the Director planner needs.
             if result.lyrics:
-                # _diarize loads pyannote on first call (~100MB cached).
-                _set_progress("loading_diarization_model", "Loading speaker-diarization model (first use downloads ~30MB)")
-                _set_progress("identifying_speakers", "Identifying speakers")
-                result.lyrics = _diarize(audio_path, result.lyrics)
-                unload_diarizer()  # Free VRAM immediately
+                try:
+                    # _diarize loads pyannote on first call (~100MB cached).
+                    _set_progress("loading_diarization_model", "Loading speaker-diarization model (first use downloads ~30MB)")
+                    _set_progress("identifying_speakers", "Identifying speakers")
+                    result.lyrics = _diarize(audio_path, result.lyrics) or result.lyrics
+                except Exception as e:
+                    print(
+                        f"[AudioAnalysis] Speaker diarization failed, keeping "
+                        f"{len(result.lyrics)} untagged lyric segments: {e}"
+                    )
+                finally:
+                    try:
+                        unload_diarizer()  # Free VRAM immediately
+                    except Exception:
+                        pass
             unload_whisper()  # Free Whisper VRAM before LLM loads
         except ImportError as e:
             print(f"[AudioAnalysis] Transcription skipped (faster-whisper not installed): {e}")
