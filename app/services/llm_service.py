@@ -278,6 +278,16 @@ MODEL_REGISTRY = {
     "Youssofal/Qwen3.6-27B-Abliterated-Heretic-Uncensored-GGUF": {
         "label": "Qwen3.6 27B Abliterated Heretic (Uncensored, Vision)",
         "gguf_file": "Qwen3.6-27B-Abliterated-Heretic-Uncensored-Q4_K_M.gguf",
+        # Qwen3 thinks by default, and _prepare_thinking() has no branch for
+        # the "qwen" style it defaults to — so nothing budgeted for
+        # reasoning and no enable_thinking kwarg was ever sent. Observed on
+        # the Director section-classification call (max_new_tokens=400): the
+        # model emitted 1485 chars of reasoning_content, returned empty
+        # content, and the pipeline silently fell back to heuristic labels.
+        # Force thinking off: the planner wants parseable structured output,
+        # not reasoning, and every thinking token is paid for at ~4 t/s on a
+        # partially offloaded 27B.
+        "disable_thinking": True,
         # The Heretic GGUF repo doesn't ship an mmproj file, but the base
         # Qwen3.6-27B vision architecture is preserved in the abliterated
         # weights — so pull the mmproj from the upstream unsloth GGUF repo.
