@@ -3172,6 +3172,57 @@ def _director_job_outputs(job: dict) -> _DirectorOutputs:
     )
 
 
+def _checkpoint_partial_clip_outputs(pid: str, job: dict) -> None:
+    """Persist the clips finished so far, mid-job.
+
+    A multi-clip Director run is one long-lived job, and its outputs only
+    reached the pipeline file once that whole job returned. So an
+    interrupted run — power loss, or a Windows Update forced restart —
+    left ``output_files`` empty on disk and resumed from clip 1, even
+    though every finished clip was already sitting in the output folder.
+
+    Checkpoint whenever another output lands, so at most one rewrite per
+    clip rather than one per poll.
+    """
+    raw_outputs = job.get("output_files") or []
+    if not raw_outputs:
+        return
+
+    with _pipeline_lock:
+        pipeline = _pipelines.get(pid)
+        if pipeline is None:
+            return
+        # stop_pipeline owns the terminal snapshot for a cancelled run.
+        if pipeline.get("status") == "cancelled":
+            return
+        if len(raw_outputs) <= pipeline.get("_checkpointed_output_count", 0):
+            return
+        clip_count = len(pipeline.get("clip_plans") or [])
+        seamless = (pipeline.get("params") or {}).get("seamless", True)
+
+    outputs = _director_job_outputs(job)
+    finished = [filename for filename in outputs if filename]
+    if not finished:
+        return
+
+    artifacts = {"output_files": list(finished)}
+    if not seamless and clip_count:
+        clip_videos = _clip_video_slots(outputs, clip_count)
+        if clip_videos:
+            artifacts["_clip_video_files"] = clip_videos
+    if not _update_pipeline(pid, **artifacts):
+        return
+
+    with _pipeline_lock:
+        pipeline = _pipelines.get(pid)
+        if pipeline is not None:
+            pipeline["_checkpointed_output_count"] = len(raw_outputs)
+
+    # Never called under _pipeline_lock: _save_pipeline_state takes
+    # _pipeline_file_lock first, then _pipeline_lock.
+    _save_pipeline_state(pid)
+
+
 def _submit_and_wait(params: dict, timeout_s: float = 600, workspace: str = None, out_dir: str = None) -> list[str]:
     """Submit a generation job and block until it completes.
 
@@ -3313,6 +3364,10 @@ def _submit_and_wait(params: dict, timeout_s: float = 600, workspace: str = None
                     p["progress"]["step"] = j.get("step", 0)
                     p["progress"]["total_steps"] = j.get("total_steps", 0)
                     p["progress"]["message"] = j.get("phase") or j.get("message") or "Generating..."
+        # Checkpoint finished clips so an interrupted run resumes from the
+        # last completed clip instead of from scratch.
+        if _dir_pid and not _detached_operation:
+            _checkpoint_partial_clip_outputs(_dir_pid, j)
         time.sleep(min(1.0, max(0.01, deadline - time.time())))
 
     request_cancel(
