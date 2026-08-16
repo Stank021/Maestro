@@ -1,5 +1,30 @@
+const {
+  isRtx50,
+  legacyRuntimeProfile,
+  runtimeProfile,
+  runtimeShell,
+} = require("./launcher_profile")
+
 module.exports = async (kernel) => {
   let port = await kernel.port()
+  const runtime = runtimeProfile(kernel)
+  const legacyRuntime = legacyRuntimeProfile(kernel)
+  const hasRecoveryRuntime = runtime.env !== legacyRuntime.env
+  const selectedEnv = hasRecoveryRuntime
+    ? `{{exists('${runtime.marker}') ? '${runtime.env}' : '${legacyRuntime.env}'}}`
+    : runtime.env
+  const selectedPython = hasRecoveryRuntime
+    ? `{{exists('${runtime.marker}') ? '${runtime.python}' : '${legacyRuntime.python}'}}`
+    : runtime.python
+  const runtimeGuard = isRtx50(kernel) ? [{
+    when: `{{!exists('${runtime.marker}')}}`,
+    method: "input",
+    params: {
+      title: "RTX 50 runtime upgrade required",
+      description: "Run Update once to install Maestro's Python 3.11 / CUDA 13 acceleration environment, then start Maestro again. Your existing environment is preserved."
+    },
+    next: null
+  }] : []
   // SERVER_NAME intentionally not set — wgp.py defaults to "localhost"
   // when SERVER_NAME isn't in the env. The classic UI is the legacy
   // secondary surface (Gradio); we don't surface a PINOKIO_SHARE_LOCAL
@@ -14,13 +39,18 @@ module.exports = async (kernel) => {
     },
     daemon: true,
     run: [
+      ...runtimeGuard,
+      ...(hasRecoveryRuntime ? [{
+        when: `{{!exists('${runtime.marker}')}}`,
+        method: "log",
+        params: {
+          raw: "The preferred H3 acceleration runtime is not ready; starting the preserved compatibility runtime. Run Update to finish the automatic migration.",
+        },
+      }] : []),
       {
         method: "shell.run",
         params: {
-          // app/env is a conda env on Windows (Python 3.11, CUDA 13 kernels);
-          // Linux keeps the uv venv. conda.path resolves relative to `path`.
-          conda: kernel.platform === 'win32' ? { path: "env" } : undefined,
-          venv: kernel.platform === 'win32' ? undefined : "env",
+          ...runtimeShell(runtime, { env: selectedEnv, python: selectedPython }),
           env: {
             SERVER_PORT: port
           },
