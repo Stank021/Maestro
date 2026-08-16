@@ -5,8 +5,30 @@ const {
 
 module.exports = async (kernel) => {
   const runtime = runtimeProfile(kernel)
+
+  // LOCAL ADDITION — halt on a failed pull instead of building over it.
+  //
+  // This checkout carries local commits (the conda runtime pin in
+  // launcher_profile.js, NVFP4 and Director fixes), so `git pull` is a real
+  // merge that can conflict or abort rather than a guaranteed fast-forward.
+  //
+  // Upstream routes only two ways here: "already up to date" -> uptodate,
+  // anything else -> build. A conflicted or aborted pull matches neither, so
+  // it lands in `build` and spends several minutes running uv pip install and
+  // npm run build against a tree that still has conflict markers in it — and
+  // reports success at the end. Detect that case first and stop instead.
+  //
+  // These signatures are the ones git prints on the failure paths a divergent
+  // checkout actually hits: merge conflicts, a dirty file the merge needs to
+  // overwrite, unmerged paths from an earlier attempt, and network/ref errors.
+  // None of them appear in the output of a clean pull, which prints only
+  // "Already up to date.", "Fast-forward", or "Merge made by the ... strategy".
+  const pullFailed =
+    "/CONFLICT|Automatic merge failed|Your local changes|Please commit your changes|refusing to merge|needs merge|fatal:|error: /i.test(input.stdout)"
+  const alreadyCurrent =
+    `/already up[- ]to[- ]date/i.test(input.stdout) && exists('${runtime.marker}') && exists('${runtime.flashMarker}')`
   const alreadyCurrentAndReady =
-    `{{/already up[- ]to[- ]date/i.test(input.stdout) && exists('${runtime.marker}') && exists('${runtime.flashMarker}') ? 'uptodate' : 'build'}}`
+    `{{${pullFailed} ? 'halted' : (${alreadyCurrent} ? 'uptodate' : 'build')}}`
   return {
     run: [{
     // Pull the latest launcher + app code (single monorepo, so this one
@@ -31,11 +53,44 @@ module.exports = async (kernel) => {
     // never a wrongly-skipped rebuild.
     method: "jump",
     params: {
+      // A failed or conflicted pull short-circuits to "halted" before either
+      // of the normal routes is considered — see the pullFailed note above.
       // An already-current checkout still enters the build path when either
       // its hardware runtime or optional FlashAttention repair marker is
       // missing. This keeps interrupted installs and one-time repairs resumable.
       id: alreadyCurrentAndReady
     }
+  }, {
+    // Reached ONLY by an explicit jump when the pull did not cleanly succeed.
+    // Stops here with the tree exactly as git left it: no dependency install,
+    // no UI build, nothing that would paper over the real failure. The pull's
+    // own output is still on screen in the step above, which is what actually
+    // says why it stopped.
+    id: "halted",
+    method: "log",
+    params: {
+      raw: [
+        "",
+        "UPDATE STOPPED — git pull did not complete cleanly.",
+        "",
+        "This checkout carries local commits, so a pull is a merge and can",
+        "conflict. Nothing was installed or rebuilt; the working tree is",
+        "untouched by this script.",
+        "",
+        "Read the git output above for the reason. Common cases:",
+        "  - CONFLICT in a launcher script  -> the local runtime pin collided",
+        "    with an upstream change to the same file; needs a hand-merge.",
+        "  - 'Your local changes ...'       -> uncommitted edits are in the way;",
+        "    commit or stash them, then run Update again.",
+        "  - 'fatal:' / 'error:'            -> network or repository problem;",
+        "    retrying usually resolves it.",
+        "",
+        "To inspect without changing anything:  git status  /  git diff",
+        "To abandon a half-finished merge:      git merge --abort",
+        ""
+      ].join("\n")
+    },
+    next: null
   }, {
     // Reached ONLY when the repo was already current (the "build" path
     // jumps over this step). Before halting, self-heal the seed-vc
