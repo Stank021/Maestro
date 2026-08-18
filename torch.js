@@ -1,4 +1,5 @@
 const {
+  RTX50_MARKER,
   isSolCapable,
   needsCuda13DriverUpdate,
   runtimeProfile,
@@ -87,8 +88,33 @@ module.exports = async (kernel) => {
     flashMessage = "uv pip install https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.7.16/flash_attn-2.7.4+cu128torch2.7-cp310-cp310-linux_x86_64.whl --force-reinstall --no-deps"
   }
 
+  // Refuse to install the legacy CUDA 12.8 stack over a working CUDA 13 one.
+  //
+  // Pinokio does not populate gpu_target / gpu_model for roughly the first
+  // half-minute after the kernel starts, so anything launched immediately
+  // after a reboot sees no GPU and lands on the non-Sol branch. For a start
+  // that is merely a failed launch; here it would `--force-reinstall` CUDA
+  // 12.8 Torch into the env, destroying the tested cu130 runtime.
+  //
+  // "Not Sol capable" and "the env already passed the RTX 50 verification"
+  // cannot both be true on real hardware — a machine that earned the marker
+  // has an sm_120 GPU. So the pair only occurs when detection failed, which
+  // makes this safe against genuinely legacy machines: they never wrote the
+  // marker. Same halt shape as start.js's runtimeGuard.
+  const detectionGuard = solCapable ? [] : [{
+    when: `{{exists('${RTX50_MARKER}')}}`,
+    method: "input",
+    params: {
+      title: "GPU not detected yet — runtime install stopped",
+      description:
+        "This environment is already verified for RTX 50 / CUDA 13, but no compatible GPU is visible right now, which normally means Pinokio has not finished detecting it after a restart. Continuing would replace your working CUDA 13 runtime with the CUDA 12.8 one. Wait about a minute after Pinokio starts, then run this again.",
+    },
+    next: null,
+  }]
+
   return {
     run: [
+      ...detectionGuard,
       {
         method: "log",
         params: {

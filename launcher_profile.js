@@ -51,6 +51,12 @@ const needsCuda13DriverUpdate = (kernel = {}) => {
 // To adopt upstream's layout later: restore env/marker/flashMarker to the
 // env-rtx50 values, drop `conda: true`, run Update once, then delete the old
 // app/env. Nothing else in these scripts needs to change.
+// Needed as a literal by the detection guard in torch.js: when GPU detection
+// has not populated yet, legacyRuntimeProfile() returns the non-RTX 50 profile,
+// whose marker is a different file. The guard has to ask about *this* marker
+// specifically to notice the contradiction.
+const RTX50_MARKER = "app/env/.maestro_torch_rtx50_v2.installed"
+
 const legacyRuntimeProfile = (kernel = {}) => {
   if (isRtx50(kernel)) {
     return {
@@ -59,14 +65,21 @@ const legacyRuntimeProfile = (kernel = {}) => {
       conda: true,
       // v2 pins Triton 3.6 for the integrated H3 Sol Engine path. The marker
       // bump makes v1.7.5 Update migrate existing RTX 50 environments once.
-      marker: "app/env/.maestro_torch_rtx50_v2.installed",
+      marker: RTX50_MARKER,
       flashMarker: "app/env/.maestro_flash_2_8_3_v1.installed",
       label: "RTX 50 / CUDA 13",
     }
   }
+  // `conda: true` here too: app/env is a conda env on this install no matter
+  // which profile selects it. GPU detection is not populated for the first
+  // ~30s after the Pinokio kernel starts, so a Start clicked right after a
+  // reboot lands in this branch with gpu_target empty. Without `conda: true`
+  // that combination activates a conda layout via `venv:` and dies on the
+  // missing env/Scripts/activate.
   return {
     env: "env",
     python: "3.10",
+    conda: true,
     marker: "app/env/.maestro_torch_v1.installed",
     flashMarker: "app/env/.maestro_flash_2_7_4_v1.installed",
     label: "CUDA 12.8 legacy",
@@ -109,6 +122,7 @@ const runtimeShell = (runtime = {}, { env, python } = {}) => {
 }
 
 module.exports = {
+  RTX50_MARKER,
   isRtx40,
   isRtx50,
   isSolCapable,
