@@ -636,6 +636,76 @@ def _director_params_from_saved_state(state: dict) -> dict:
     return params
 
 
+def _dedupe_activated_loras(
+    loras: dict,
+    *,
+    label: str,
+    pid: str,
+) -> dict:
+    """Drop repeated LoRA activations, keeping the first of each file.
+
+    mmgp pins each activation separately, so a LoRA listed twice is pinned
+    twice: the logs show krea2_identity_edit_v1_2 taking 14 blocks / 3487 MB
+    against 7 blocks / 1743.5 MB for a single activation. On the LTX-2 22B
+    LoRAs that is ~7 GB of page-locked reserved RAM per redundant copy, which
+    is a large bite out of mmgp's reserved-RAM ceiling for no benefit.
+
+    Duplicates reach us because activations are merged from several sources
+    (model defaults, the saved per-mode selection, the clip plan) with no
+    single owner deduping them. `loras_multipliers` is positional, so a
+    dropped LoRA has to take its multiplier token with it — same keep-list
+    shape as the file-existence filters at the call sites. Basenames are
+    compared case-insensitively: the existence filter has already restricted
+    these to one directory, and Windows paths are not case-sensitive.
+
+    When the repeats disagree on multiplier the first one wins, and we say so
+    rather than guessing at a merge.
+    """
+    activated = list(loras.get("activated_loras", []) or [])
+    if not activated:
+        return loras
+
+    mult_tokens = (loras.get("loras_multipliers", "") or "").split()
+    seen: dict[str, str] = {}
+    kept: list[str] = []
+    kept_mults: list[str] = []
+    dropped: list[str] = []
+    conflicts: list[str] = []
+
+    for idx, name in enumerate(activated):
+        key = os.path.basename(name).lower()
+        token = mult_tokens[idx] if idx < len(mult_tokens) else ""
+        if key in seen:
+            dropped.append(os.path.basename(name))
+            if token and token != seen[key]:
+                conflicts.append(
+                    f"{os.path.basename(name)} ({seen[key]} kept, {token} dropped)"
+                )
+            continue
+        seen[key] = token
+        kept.append(name)
+        if idx < len(mult_tokens):
+            kept_mults.append(token)
+
+    if not dropped:
+        return loras
+
+    print(
+        f"[Pipeline {pid}] {label} LoRAs after dedupe: {len(kept)} kept, "
+        f"{len(dropped)} duplicate activation(s) dropped: {dropped}"
+    )
+    if conflicts:
+        print(
+            f"[Pipeline {pid}] {label} LoRA duplicates had differing "
+            f"multipliers; kept the first: {conflicts}"
+        )
+    return {
+        **loras,
+        "activated_loras": kept,
+        "loras_multipliers": " ".join(kept_mults),
+    }
+
+
 def _limit_director_image_refs(
     model_type: str,
     refs: list[str],
@@ -1779,7 +1849,10 @@ def _rerun_clip_image_impl(out_dir: str, pid: str, clip_index: int, prompt_overr
 
     # Get image gen params from the saved pipeline state
     image_model = state.get("image_model") or "flux2_klein_9b"
-    image_loras = state.get("image_loras") or {}
+    # Saved state predating the dedupe can still hold duplicate activations.
+    image_loras = _dedupe_activated_loras(
+        state.get("image_loras") or {}, label="Image rerun", pid=pid
+    )
     image_params = state.get("image_params") or {}
     validation_params = _director_params_from_saved_state(state)
     validation_params["image_model"] = image_model
@@ -1858,7 +1931,7 @@ def _rerun_clip_image_impl(out_dir: str, pid: str, clip_index: int, prompt_overr
         "settings_version": 2.52,
         "generation_mode": "image",
         "repeat_generation": 1,
-        "negative_prompt": "",
+        "negative_prompt": image_params.get("negative_prompt") or "",
         "video_length": 1,
         "activated_loras": image_loras.get("activated_loras", []),
         "loras_multipliers": " ".join(
@@ -2212,7 +2285,9 @@ def _rerun_clip_video_impl(out_dir: str, pid: str, clip_index: int, prompt_overr
     }
     _preflight_h3_director_prompts(video_model, [prompt_plan], pid=pid)
     prompt = prompt_plan["video_prompt"]
-    video_loras = state.get("video_loras") or {}
+    video_loras = _dedupe_activated_loras(
+        state.get("video_loras") or {}, label="Video rerun", pid=pid
+    )
     video_params = state.get("video_params") or {}
     shot_image_policy = _saved_pipeline_shot_image_policy(state)
     uses_shot_images = shot_images_required(shot_image_policy)
@@ -2437,7 +2512,7 @@ def _rerun_clip_video_impl(out_dir: str, pid: str, clip_index: int, prompt_overr
         "settings_version": 2.52,
         "generation_mode": "video",
         "repeat_generation": 1,
-        "negative_prompt": "",
+        "negative_prompt": video_params.get("negative_prompt") or "",
         "activated_loras": video_loras.get("activated_loras", []),
         "loras_multipliers": " ".join(
             m.split(";")[0] for m in (video_loras.get("loras_multipliers", "") or "").split(" ") if m
@@ -5212,6 +5287,10 @@ def _run_image_generation(pid: str, params: dict, clip_plans: list[dict], out_di
     except Exception as _e:
         print(f"[Pipeline {pid}] LoRA file-existence filter skipped: {_e}")
 
+    # After the existence filter, not inside it: duplicates still need
+    # dropping on the paths where the LoRA directory could not be read.
+    image_loras = _dedupe_activated_loras(image_loras, label="Image", pid=pid)
+
     resolution = image_params.get("resolution", "1280x720")
     steps = image_params.get("num_inference_steps", 8)
     guidance = image_params.get("guidance_scale", 1)
@@ -5323,7 +5402,7 @@ def _run_image_generation(pid: str, params: dict, clip_plans: list[dict], out_di
             "settings_version": 2.52,
             "generation_mode": "image",
             "repeat_generation": 1,
-            "negative_prompt": "",
+            "negative_prompt": image_params.get("negative_prompt") or "",
             "video_length": 1,
             "activated_loras": image_loras.get("activated_loras", []),
             "loras_multipliers": image_loras.get("loras_multipliers", ""),
@@ -5636,6 +5715,8 @@ def _run_video_generation(pid: str, params: dict, clip_plans: list[dict],
                 )
     except Exception as _e:
         print(f"[Pipeline {pid}] Video LoRA file-existence filter skipped: {_e}")
+
+    video_loras = _dedupe_activated_loras(video_loras, label="Video", pid=pid)
 
     audio_path = params.get("audio_path")
     seamless = params.get("seamless", True)
@@ -6193,7 +6274,7 @@ def _run_video_generation(pid: str, params: dict, clip_plans: list[dict],
             "settings_version": 2.52,
             "generation_mode": "video",
             "repeat_generation": 1,
-            "negative_prompt": "",
+            "negative_prompt": video_params.get("negative_prompt") or "",
             "self_refiner_setting": self_refiner,
             "_director_pipeline_id": pid,
             **lora_params,
@@ -6338,7 +6419,7 @@ def _run_video_generation(pid: str, params: dict, clip_plans: list[dict],
             "settings_version": 2.52,
             "generation_mode": "video",
             "repeat_generation": 1,
-            "negative_prompt": "",
+            "negative_prompt": video_params.get("negative_prompt") or "",
             "self_refiner_setting": self_refiner,
             "_director_pipeline_id": pid,
             **lora_params,
