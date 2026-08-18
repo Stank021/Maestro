@@ -242,15 +242,52 @@ def _get_whisper_model():
     )
     os.makedirs(cache_dir, exist_ok=True)
 
-    print("[AudioAnalysis] Loading faster-whisper small model (CUDA)...")
-    _whisper_model = WhisperModel(
-        "small",
-        device="cuda",
-        compute_type="float16",
-        download_root=cache_dir,
-    )
-    print("[AudioAnalysis] Whisper model loaded")
-    return _whisper_model
+    # CUDA first, CPU as a fallback.
+    #
+    # faster-whisper runs on CTranslate2, which is built against CUDA 12 and
+    # loads cublas64_12.dll / cudnn64_*.dll by explicit name. A CUDA 13
+    # runtime ships cublas64_13.dll instead, so on those installs the GPU
+    # path raises "Library cublas64_12.dll is not found or cannot be loaded"
+    # at the first encode() — after the model appears to load successfully.
+    #
+    # analyze() catches that and returns lyrics=None, so before this fallback
+    # the only symptom was a music video whose clips silently stopped being
+    # lyric-aligned. Transcribing the `small` model on CPU costs a couple of
+    # minutes for a full song, which is a far better outcome than no lyrics.
+    #
+    # Deliberately NOT fixed by installing nvidia-cublas-cu12: that puts a
+    # second CUDA runtime on PATH next to a working CUDA 13 PyTorch build,
+    # and a DLL-resolution-order accident there breaks generation itself.
+    last_error = None
+    for device, compute_type in (("cuda", "float16"), ("cpu", "int8")):
+        try:
+            print(f"[AudioAnalysis] Loading faster-whisper small model ({device.upper()})...")
+            model = WhisperModel(
+                "small",
+                device=device,
+                compute_type=compute_type,
+                download_root=cache_dir,
+            )
+            # Construction does not touch the CUDA libraries — the load only
+            # fails once encode() runs, deep inside transcribe(). Burn one
+            # second of silence through the real path so a broken GPU build
+            # is caught here, where we can still fall back, instead of
+            # halfway through the song. transcribe() is lazy, so the
+            # generator has to be consumed for this to mean anything.
+            probe_segments, _ = model.transcribe(
+                np.zeros(16000, dtype=np.float32), beam_size=1
+            )
+            list(probe_segments)
+            if device == "cpu":
+                print("[AudioAnalysis] GPU transcription unavailable; using CPU (slower but correct)")
+            print("[AudioAnalysis] Whisper model loaded")
+            _whisper_model = model
+            return _whisper_model
+        except Exception as exc:
+            last_error = exc
+            print(f"[AudioAnalysis] {device.upper()} transcription unavailable: {exc}")
+
+    raise RuntimeError(f"Could not initialise faster-whisper on GPU or CPU: {last_error}")
 
 
 def _clean_lyrics_hint(lyrics: Optional[str]) -> Optional[str]:
