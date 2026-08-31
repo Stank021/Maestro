@@ -1624,6 +1624,12 @@ interface AppState {
   directorWriteSong: () => Promise<void>
   directorGenerateTrack: () => Promise<void>
   directorAnalyzeAndPlan: (audioPath: string, opts?: { transcribe?: boolean; lyricsHint?: string }) => Promise<void>
+  /** Re-run analysis on the track already uploaded, seeding Whisper with whatever
+   *  lyrics are in the box now. The paste field used to live only in the
+   *  pre-upload branch, so a mishearing could not be corrected without starting
+   *  the whole run again — the backend always accepted lyrics_hint, only the UI
+   *  hid it. */
+  directorReanalyzeWithLyrics: () => Promise<void>
   directorSetEnergyBias: (bias: number) => Promise<void>
   directorConfirmStructure: () => void
   directorSetSceneDescription: (prompt: string) => void
@@ -7478,6 +7484,17 @@ export const useStore = create<AppState>((set, get) => ({
   // UPLOADED track or a GENERATED one — both converge here with an audio path
   // on disk and land on the 'structure' step, so everything downstream is
   // identical regardless of where the audio came from.
+  directorReanalyzeWithLyrics: async () => {
+    const path = get().directorAudioPath
+    if (!path) return
+    // Same path as the first pass: analyze -> classify sections -> speakers -> plan,
+    // so the corrected words reach the shot planning and not just the display.
+    await get().directorAnalyzeAndPlan(path, {
+      transcribe: true,
+      lyricsHint: get().directorKnownLyrics.trim() || undefined,
+    })
+  },
+
   directorAnalyzeAndPlan: async (audioPath, opts) => {
     const transcribe = opts?.transcribe !== false
     set({

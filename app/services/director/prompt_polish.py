@@ -1682,11 +1682,11 @@ def polish_prompts_third_pass(
         "untouched.\n\n"
         "BAD (polish broke the dialogue):\n"
         "  Pass 2:  Maya says \"Variables are fun, Leo.\"\n"
-        "  Polish:  The woman in the green scarf says \"Variables are fun, boy in scruffy clothes.\"\n"
+        "  Polish:  The <appearance descriptor for Maya> says \"Variables are fun, <appearance descriptor for Leo>.\"\n"
         "                                                                    ^^^^^^^^^^^^^^^^^^^^^^^ WRONG: name was inside quotes\n\n"
         "GOOD (polish only touched narrative prose):\n"
         "  Pass 2:  Maya says \"Variables are fun, Leo.\"\n"
-        "  Polish:  The woman in the green scarf says \"Variables are fun, Leo.\"\n"
+        "  Polish:  The <appearance descriptor for Maya> says \"Variables are fun, Leo.\"\n"
         "           ^^^^^^^^^^^^^^^^^^^^^^^^^^^ name in narrative replaced; dialogue preserved\n\n"
     )
 

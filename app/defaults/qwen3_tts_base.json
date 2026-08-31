@@ -6,7 +6,13 @@
         "URLs": [
             "https://huggingface.co/DeepBeepMeep/TTS/resolve/main/qwen3_tts_12hz_1b7_base_bf16.safetensors",
             "https://huggingface.co/DeepBeepMeep/TTS/resolve/main/qwen3_tts_12hz_1b7_base_quanto_bf16_int8.safetensors"
-        ]
+        ],
+        "voice_ref_transcript": true,
+        "alt_prompt": {
+            "label": "Reference transcript",
+            "placeholder": "What the reference audio actually says. Leave empty for x-vector-only cloning (weaker). Two speakers: one line each.",
+            "lines": 3
+        }
     },
     "prompt": "I checked the schedule twice, and everything lines up.",
     "alt_prompt": "",

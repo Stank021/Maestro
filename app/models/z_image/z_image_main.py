@@ -150,6 +150,16 @@ class model_factory:
             default_dtype=VAE_dtype,
         )
 
+        # The ZImageTurbo VAE checkpoint is stored in bf16. When Maestro's global
+        # VAE precision is set to 16-bit, VAE_dtype arrives as torch.float16 and the
+        # loader leaves biases in fp16 while the latents remain bf16 - conv2d then
+        # dies at the final decode with:
+        #   "Input type (struct c10::BFloat16) and bias type (struct c10::Half)"
+        # after the sampler has already done all its work. Normalise the module to
+        # one dtype that matches the latents.
+        if VAE_dtype == torch.float16:
+            vae = vae.to(torch.bfloat16)
+
         # Scheduler
         with open(fl.locate_file("ZImageTurbo_scheduler_config.json"), "r", encoding="utf-8") as f:
             scheduler_config = json.load(f)

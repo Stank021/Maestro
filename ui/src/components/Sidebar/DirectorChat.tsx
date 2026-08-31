@@ -405,6 +405,7 @@ export function DirectorChat() {
   const imageGenProgress = useStore(s => s.directorImageGenProgress)
   const uploadAndAnalyze = useStore(s => s.directorUploadAndAnalyze)
   const knownLyrics = useStore(s => s.directorKnownLyrics)
+  const reanalyzeWithLyrics = useStore(s => s.directorReanalyzeWithLyrics)
   const setKnownLyrics = useStore(s => s.setDirectorKnownLyrics)
   const setEnergyBias = useStore(s => s.directorSetEnergyBias)
   const confirmStructure = useStore(s => s.directorConfirmStructure)
@@ -809,6 +810,36 @@ export function DirectorChat() {
                 </div>
               </SystemBubble>
             ) : audioFile && pastStep('analyze') ? (
+              <>
+              {/* Lyrics correction AFTER analysis. The paste field originally existed only
+                  in the pre-upload branch, so a mishearing could not be fixed without
+                  restarting the whole run - and Whisper's mondegreens feed the shot
+                  planning, not just the display. The backend always accepted lyrics_hint
+                  on /api/v1/audio/analyze; only the UI hid it. */}
+              {!isShortFilm && (
+                <SystemBubble>
+                  <label className="text-[11px] text-text-muted mb-1 block">
+                    Known lyrics (optional) - paste the real words, then re-transcribe so the
+                    planner works from them instead of from guesses
+                  </label>
+                  <textarea
+                    value={knownLyrics}
+                    onChange={e => setKnownLyrics(e.target.value)}
+                    disabled={loading}
+                    rows={3}
+                    placeholder="Paste the song's actual lyrics here..."
+                    className="w-full bg-bg-secondary border border-border rounded px-2 py-1.5 text-xs text-text-primary resize-none focus:outline-none focus:border-accent-blue transition-colors disabled:opacity-60"
+                  />
+                  <button
+                    onClick={() => reanalyzeWithLyrics()}
+                    disabled={loading || !knownLyrics.trim()}
+                    title="Re-run transcription and clip planning using these lyrics"
+                    className="mt-1.5 w-full py-1.5 rounded-md text-[11px] font-medium border border-border text-text-secondary hover:text-text-primary hover:border-border-light transition-colors disabled:opacity-40 disabled:cursor-default"
+                  >
+                    {loading ? 'Working...' : 'Re-transcribe with these lyrics'}
+                  </button>
+                </SystemBubble>
+              )}
               <UserBubble>
                 <div className="flex items-center gap-2 text-xs text-text-primary">
                   {isShortFilm ? <Film size={12} className="text-text-muted" /> : <Music size={12} className="text-text-muted" />}
@@ -818,6 +849,7 @@ export function DirectorChat() {
                   )}
                 </div>
               </UserBubble>
+              </>
             ) : null}
           </>
         )}

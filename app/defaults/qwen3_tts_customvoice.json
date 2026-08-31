@@ -6,7 +6,14 @@
         "URLs": [
             "https://huggingface.co/DeepBeepMeep/TTS/resolve/main/qwen3_tts_12hz_1b7_customvoice_bf16.safetensors",
             "https://huggingface.co/DeepBeepMeep/TTS/resolve/main/qwen3_tts_12hz_1b7_customvoice_quanto_bf16_int8.safetensors"
-        ]
+        ],
+        "voice_instruction_label": "Delivery instruction",
+        "voice_instruction_placeholder": "How the chosen speaker should say it, e.g. 'calm, friendly, slightly husky'.",
+        "alt_prompt": {
+            "label": "Delivery instruction",
+            "placeholder": "e.g. calm, friendly, slightly husky",
+            "lines": 2
+        }
     },
     "prompt": "The lights are already on, so we can start whenever you are ready.",
     "alt_prompt": "calm, friendly, slightly husky",

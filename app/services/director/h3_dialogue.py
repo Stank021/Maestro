@@ -489,7 +489,14 @@ def compile_h3_vocal_contract(
         detail = " ".join([*instructions, guard])
         label = "DIALOGUE AND VOCAL PERFORMANCE"
     elif spans:
-        replacements = [h3_dialogue_tag(prompt[start:end]) for start, end in spans]
+        replacements = []
+        for start, end in spans:
+            try:
+                replacements.append(h3_dialogue_tag(prompt[start:end]))
+            except H3DialogueContractError:
+                # An empty quoted span is planner markup noise, not a spoken
+                # line. Drop it instead of aborting the entire render.
+                replacements.append("")
         prompt = _replace_spans(prompt, spans, replacements)
         _, remains_malformed = _dialogue_spans(prompt)
         if remains_malformed:

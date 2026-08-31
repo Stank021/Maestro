@@ -5504,6 +5504,20 @@ def get_model_options(model_type: str):
         # Max voice slots the model accepts. UI caps the "Add Voice" button
         # at this number. Defaults to 6 (Kugel); Scenema sets 2.
         "max_voice_count": md.get("max_voice_count"),
+        # TTS models whose alt_prompt is a voice DESCRIPTION / delivery
+        # INSTRUCTION rather than a reference transcript (Qwen3 Voice Design,
+        # Qwen3 Custom Voice). A label here makes the sidebar render a box for
+        # it; without one the field is unreachable, which is how Voice Design
+        # ended up silently running on whatever alt_prompt the previous model
+        # left behind.
+        "voice_instruction_label": md.get("voice_instruction_label"),
+        "voice_instruction_placeholder": md.get("voice_instruction_placeholder", ""),
+        # Voice-clone models that condition on the reference audio's transcript
+        # (Qwen3 TTS Base). When True the UI shows a per-voice transcript box
+        # that writes one line of alt_prompt per voice slot. Without a
+        # transcript the pipeline falls back to x-vector-only cloning, which
+        # is noticeably weaker — see models/TTS/qwen3/pipeline.py.
+        "voice_ref_transcript": md.get("voice_ref_transcript", False),
     }
 
 
@@ -25327,9 +25341,42 @@ _mimetypes.add_type("text/javascript", ".mjs")
 _mimetypes.add_type("text/css", ".css")
 _mimetypes.add_type("image/svg+xml", ".svg")
 
+class _NoCacheIndexStaticFiles(StaticFiles):
+    """StaticFiles that lets hashed assets cache forever but never index.html.
+
+    Vite content-hashes every asset filename, so `index-<hash>.js` and its
+    siblings are safe to cache indefinitely — a new build simply produces a
+    new name. `index.html` is the one file whose URL never changes, and it
+    is the file that names which hashed bundle to load. A client holding a
+    cached copy therefore keeps requesting the PREVIOUS build's JS forever.
+
+    That fails silently and misleadingly: the UI loads, responds, and simply
+    behaves like an older version of itself — missing controls, settings
+    that will not stick, a limit that "changed by itself". It cost a full
+    code investigation on 2026-08-19 ("all H3 models stuck at 15s") and hid
+    a UI fix again on 2026-08-26. Pinokio's embedded Electron webview caches
+    harder than Chrome and ignores Ctrl+Shift+R, so the user-side workaround
+    was appending a cache-busting query string by hand.
+
+    `no-cache` does not mean "do not store" — the browser may keep the copy,
+    but must revalidate with the server before using it, so an unchanged
+    index.html still costs only a 304.
+    """
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        # Check what was actually served rather than what was requested:
+        # with html=True a bare directory request also resolves to
+        # index.html, and so does the SPA fallback.
+        served = getattr(response, "path", None)
+        if served and os.path.basename(str(served)).lower() == "index.html":
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
 _ui_dist = os.path.normpath(os.path.join(_app_dir, "..", "ui", "dist"))
 if os.path.isdir(_ui_dist):
-    api.mount("/", StaticFiles(directory=_ui_dist, html=True))
+    api.mount("/", _NoCacheIndexStaticFiles(directory=_ui_dist, html=True))
     print(f"[Maestro] React UI serving from {_ui_dist}")
 else:
     @api.get("/")

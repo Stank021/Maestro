@@ -41,7 +41,7 @@ _api_key: str = ""           # API key for OpenAI/Anthropic
 
 # Auto-unload idle timer
 _idle_timer: Optional[threading.Timer] = None
-_idle_timeout: float = 60.0  # seconds before auto-unload
+_idle_timeout: float = 900.0  # seconds before auto-unload (raised 2026-08-21: 60s evicted the LLM mid-planning)
 
 # Streaming state — accumulates tokens during generation
 _stream_buffer: str = ""
@@ -251,6 +251,25 @@ def _build_size_hint(info: dict) -> str:
 # size_hint is built automatically from weights_gb + mmproj_gb + KV-cache
 # estimate at module load (see post-loop below).
 MODEL_REGISTRY = {
+    "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP": {
+        "label": "Gemma 4 26B A4B MoE QAT Uncensored (Vision)",
+        "gguf_file": "Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf",
+        "mmproj_file": "mmproj-Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-BF16.gguf",
+        # 16.8 GB weights + 1.19 GB mmproj = ~18 GB, which does not fit a 16 GB
+        # card. It is an A4B MoE (~4B active), so keeping the experts in system
+        # RAM and running the active path on the GPU costs very little speed and
+        # avoids a 2-4 GB spill. Drop this flag on a 24 GB+ card.
+        "extra_flags": ["--cpu-moe"],
+        "size_hint": "18 GB download · MoE, experts stream from system RAM",
+        "weights_gb": 16.8, "mmproj_gb": 1.19, "arch": "gemma4-26b-a4b",
+    },
+    "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced": {
+        "label": "Gemma 4 12B QAT Uncensored (Vision, Fast)",
+        "gguf_file": "Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf",
+        "mmproj_file": "mmproj-Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced-BF16.gguf",
+        "size_hint": "8 GB VRAM · fits fully, no spill",
+        "weights_gb": 7.38, "mmproj_gb": 0.18, "arch": "gemma4-12b",
+    },
     "unsloth/Qwen3.5-2B-GGUF": {
         "label": "Qwen3.5 2B (Fast)",
         "gguf_file": "Qwen3.5-2B-Q4_K_S.gguf",
@@ -537,6 +556,8 @@ for _repo_id, _info in MODEL_REGISTRY.items():
 # deprecated / experimental variants. A repo id listed here that isn't
 # currently in the registry is simply skipped.
 _PUBLIC_MODEL_ORDER = [
+    "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced",
+    "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP",
     "Youssofal/Qwen3.6-27B-Abliterated-Heretic-Uncensored-GGUF",
     "Nesuwka/gemma-4-E2B-it-heretic-ara-Q4_K_M-GGUF",
     "Abhiray/gemma-4-E4B-it-heretic-GGUF",                         # default (Recommended)
@@ -1645,7 +1666,11 @@ def generate(
     # remote OpenAI-compatible endpoints vary in which response_format
     # flavor they accept, so we degrade to an unconstrained call there.
     if json_schema is not None:
-        if _provider == "local":
+        if _provider in ("local", "remote"):
+            # llama.cpp-derived servers (llama-server, KoboldCpp, LM Studio)
+            # accept the same response_format extension, so a remote endpoint
+            # gets the grammar too. If it rejects the field we retry once
+            # unconstrained below — exactly the old behaviour.
             payload["response_format"] = {"type": "json_object", "schema": json_schema}
         else:
             print(f"[LLM] json_schema requested but provider={_provider} — sending unconstrained (grammar is local llama-server only)")
@@ -1664,9 +1689,32 @@ def generate(
         )
         resp.raise_for_status()
     except requests.exceptions.RequestException as e:
-        # A dead subprocess surfaces here as a ConnectionError; translate it
-        # into an actionable error naming the real cause (see the helper).
-        raise _diagnose_llm_request_failure(e) from e
+        # A remote endpoint that does not understand the llama.cpp
+        # response_format extension rejects the whole request. Retry once
+        # without the grammar so such servers behave as they did before.
+        _status = getattr(getattr(e, "response", None), "status_code", None)
+        if (
+            json_schema is not None
+            and _provider == "remote"
+            and "response_format" in payload
+            and _status in (400, 404, 422, 500, 501)
+        ):
+            print(f"[LLM] remote rejected response_format (HTTP {_status}) — retrying unconstrained")
+            payload.pop("response_format", None)
+            try:
+                resp = requests.post(
+                    f"{_server_url()}/v1/chat/completions",
+                    json=payload,
+                    headers=_api_headers(),
+                    timeout=(10, 600),
+                )
+                resp.raise_for_status()
+            except requests.exceptions.RequestException as e2:
+                raise _diagnose_llm_request_failure(e2) from e2
+        else:
+            # A dead subprocess surfaces here as a ConnectionError; translate it
+            # into an actionable error naming the real cause (see the helper).
+            raise _diagnose_llm_request_failure(e) from e
     data = resp.json()
 
     raw_content = data["choices"][0]["message"]["content"] or ""

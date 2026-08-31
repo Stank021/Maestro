@@ -43,6 +43,20 @@ export function AudioModeSection() {
   // "Add Voice" button at this limit so users aren't offered slots that
   // would be silently discarded by the backend.
   const maxVoiceCount = ((modelOptions as { max_voice_count?: number }).max_voice_count) ?? 6
+  // Qwen3 TTS Base conditions the clone on what the reference audio SAYS, not
+  // just on its speaker embedding. Models that want it set
+  // `voice_ref_transcript: true` in their model_def; the backend reads the
+  // transcripts out of alt_prompt, one line per voice slot, and falls back to
+  // x-vector-only cloning for any slot left blank.
+  const wantsRefTranscript = Boolean((modelOptions as { voice_ref_transcript?: boolean }).voice_ref_transcript)
+  const refTranscriptLines = String((params.alt_prompt as string) || '').split('\n')
+  const setRefTranscript = (i: number, value: string) => {
+    const lines = String((params.alt_prompt as string) || '').split('\n')
+    while (lines.length <= i) lines.push('')
+    lines[i] = value.replace(/\n/g, ' ')
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
+    setParam('alt_prompt' as keyof import('../../types').GenerateParams, lines.join('\n'))
+  }
 
   const getAudioDuration = (file: File): Promise<number | null> => {
     // Use HTML5 <video> element for video files and <audio> for audio.
@@ -197,6 +211,15 @@ export function AudioModeSection() {
                     onChange={e => setTtsVoiceName(i, e.target.value)}
                     className="w-full mt-1 bg-bg-tertiary border border-border rounded px-1.5 py-0.5 text-[9px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue"
                   />
+                  {wantsRefTranscript && (
+                    <textarea
+                      rows={2}
+                      placeholder="Reference transcript — what this clip says"
+                      value={refTranscriptLines[i] || ''}
+                      onChange={e => setRefTranscript(i, e.target.value)}
+                      className="w-full mt-1 bg-bg-tertiary border border-border rounded px-1.5 py-0.5 text-[9px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue resize-none"
+                    />
+                  )}
                 </div>
               ))}
             </div>

@@ -583,7 +583,7 @@ export function AdvancedSettings() {
                     <div key={setting.id}>
                       <label className="text-[11px] text-text-muted uppercase tracking-wider mb-1.5 block">{setting.name}</label>
                       <input
-                        type="number"
+                        type={setting.type === 'text' ? 'text' : 'number'}
                         placeholder="Empty = disabled"
                         value={String((params.custom_settings as Record<string, unknown> | undefined)?.[setting.id] ?? '')}
                         onChange={e => {
@@ -592,7 +592,7 @@ export function AdvancedSettings() {
                           if (val === '') {
                             delete cs[setting.id]
                           } else {
-                            cs[setting.id] = parseFloat(val)
+                            cs[setting.id] = setting.type === 'text' ? val : parseFloat(val)
                           }
                           setParam('custom_settings', Object.keys(cs).length > 0 ? cs : undefined)
                         }}
