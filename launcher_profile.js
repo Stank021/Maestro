@@ -67,6 +67,7 @@ const legacyRuntimeProfile = (kernel = {}) => {
       // bump makes v1.7.5 Update migrate existing RTX 50 environments once.
       marker: RTX50_MARKER,
       flashMarker: "app/env/.maestro_flash_2_8_3_v1.installed",
+      flashSupported: true,
       label: "RTX 50 / CUDA 13",
     }
   }
@@ -76,12 +77,23 @@ const legacyRuntimeProfile = (kernel = {}) => {
   // reboot lands in this branch with gpu_target empty. Without `conda: true`
   // that combination activates a conda layout via `venv:` and dies on the
   // missing env/Scripts/activate.
+  const target = String(kernel.gpu_target || "").toLowerCase()
+  const legacyWindowsFlashSupported = (
+    kernel.platform !== "win32"
+    || target === "sm_89"
+    || isRtx40(kernel)
+  )
   return {
     env: "env",
     python: "3.10",
     conda: true,
     marker: "app/env/.maestro_torch_v1.installed",
-    flashMarker: "app/env/.maestro_flash_2_7_4_v1.installed",
+    // The pinned Windows 2.7.4 wheel contains only sm_89 cubins. Bump the
+    // marker for older GPUs so Update removes the incompatible package once.
+    flashMarker: legacyWindowsFlashSupported
+      ? "app/env/.maestro_flash_2_7_4_v1.installed"
+      : "app/env/.maestro_flash_disabled_v2.installed",
+    flashSupported: legacyWindowsFlashSupported,
     label: "CUDA 12.8 legacy",
   }
 }
@@ -93,6 +105,7 @@ const solRuntimeProfile = (kernel = {}) => {
     python: "3.11",
     marker: "app/env-sol/.maestro_sol_runtime_v1.installed",
     flashMarker: "app/env-sol/.maestro_sol_flash_2_8_3_v1.installed",
+    flashSupported: true,
     label: "H3 Sol Engine / CUDA 13",
   }
 }
