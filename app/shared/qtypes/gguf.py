@@ -488,7 +488,13 @@ def _try_llamacpp_cuda_linear(weight_tensor, input_tensor, bias, target_dtype):
         gguf_llamacpp_cuda = _gguf_cuda_module()
         if gguf_llamacpp_cuda is None or not gguf_llamacpp_cuda.may_support_linear_qtype_name(qtype_name):
             return None
-        return gguf_llamacpp_cuda.linear(raw, qtype_name, tuple(getattr(weight_tensor, "_tensor_shape", weight_tensor.shape)), input_tensor, bias, target_dtype)
+        # The llama.cpp CUDA kernels require a contiguous activation, and the
+        # weight check above never covered it. H3 reaches this call with a
+        # transposed/viewed input, so every linear raised "input must be
+        # contiguous", was swallowed below, and silently fell back to
+        # dequantize-then-matmul -- losing the whole point of the GGUF.
+        # .contiguous() is a no-op when the tensor already is one.
+        return gguf_llamacpp_cuda.linear(raw, qtype_name, tuple(getattr(weight_tensor, "_tensor_shape", weight_tensor.shape)), input_tensor.contiguous(), bias, target_dtype)
     except Exception as exc:
         _gguf_log_once(f"llamacpp_cuda_linear_{qtype_name}", f"[GGUF][llama.cpp CUDA] linear GGUF CUDA kernels failed for {qtype_name}, using fallback: {exc}")
         return None
@@ -507,7 +513,8 @@ def _try_llamacpp_cuda_embedding(weight_tensor, index_tensor, target_dtype):
         gguf_llamacpp_cuda = _gguf_cuda_module()
         if gguf_llamacpp_cuda is None or not gguf_llamacpp_cuda.may_support_embedding_qtype_name(qtype_name):
             return None
-        return gguf_llamacpp_cuda.embedding(raw, qtype_name, tuple(getattr(weight_tensor, "_tensor_shape", weight_tensor.shape)), index_tensor, target_dtype)
+        # Same contiguity contract as the linear path above.
+        return gguf_llamacpp_cuda.embedding(raw, qtype_name, tuple(getattr(weight_tensor, "_tensor_shape", weight_tensor.shape)), index_tensor.contiguous(), target_dtype)
     except Exception as exc:
         _gguf_log_once(f"llamacpp_cuda_embedding_{qtype_name}", f"[GGUF][llama.cpp CUDA] embedding GGUF CUDA kernels failed for {qtype_name}, using fallback: {exc}")
         return None
