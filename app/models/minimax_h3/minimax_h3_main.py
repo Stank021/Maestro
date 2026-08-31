@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import os
+import struct
 from contextlib import nullcontext
 
 import numpy as np
@@ -678,8 +679,92 @@ def _normalize_conditioner_checkpoint_namespaces(
     )
 
 
+def _probe_gguf_h3_checkpoint(filename: str) -> dict[str, int | bool | None] | None:
+    """Size the AdaLN projection by reading a GGUF tensor table directly.
+
+    The pruned H3 GGUFs published on Unsloth's repo carry **zero** kv metadata
+    pairs. ``quant_router.load_metadata_state_dict`` cannot parse them -- it
+    raises ``UnicodeDecodeError`` part-way through the header -- so the normal
+    probe never sees ``adaln_t_table`` and falls back to the full 2688-wide
+    AdaLN. Every ``blocks.N.adaln_proj.linear.weight`` then fails to load,
+    because these files are the **rank-8 pruned** variant whose projections
+    genuinely take 8 inputs, not 2688.
+
+    The tensor table alone carries everything the probe needs, so read it here
+    instead of going through the state-dict reader.
+
+    Two GGUF details matter:
+
+    * dimensions are stored in **reverse** order, so ``adaln_t_table`` is
+      written ``[8, 1025]`` and means ``[1025, 8]``;
+    * a tensor name is a length-prefixed UTF-8 string, but the surrounding
+      header is binary, which is exactly what defeats the text-oriented reader.
+
+    Returns ``None`` for anything that is not a readable GGUF so the caller
+    keeps its existing behaviour for every other checkpoint format.
+    """
+
+    try:
+        with open(filename, "rb") as handle:
+            if handle.read(4) != b"GGUF":
+                return None
+            (version,) = struct.unpack("<I", handle.read(4))
+            if version not in (2, 3):
+                return None
+            (tensor_count,) = struct.unpack("<Q", handle.read(8))
+            (kv_count,) = struct.unpack("<Q", handle.read(8))
+            if tensor_count == 0 or tensor_count > 1_000_000:
+                return None
+            # Only files that skip metadata entirely are handled here; anything
+            # with a populated kv block goes down the normal reader, which
+            # understands its quantization_format key.
+            if kv_count:
+                return None
+
+            table_dims: list[int] | None = None
+            convrot = False
+            for _ in range(tensor_count):
+                (name_len,) = struct.unpack("<Q", handle.read(8))
+                name = handle.read(name_len).decode("utf-8", "replace")
+                (n_dims,) = struct.unpack("<I", handle.read(4))
+                dims = [struct.unpack("<Q", handle.read(8))[0] for _ in range(n_dims)]
+                handle.read(4)  # ggml type
+                handle.read(8)  # data offset
+                for prefix in ("model.diffusion_model.", "diffusion_model."):
+                    if name.startswith(prefix):
+                        name = name[len(prefix):]
+                        break
+                if name.endswith(".comfy_quant"):
+                    convrot = True
+                elif name == "adaln_t_table":
+                    table_dims = dims
+    except (OSError, struct.error, ValueError):
+        return None
+
+    if not table_dims or len(table_dims) != 2:
+        return None
+    # Reverse GGUF's dimension order to reach torch's [curve_grid, width].
+    curve_grid, time_embed_dim = int(table_dims[1]), int(table_dims[0])
+    if curve_grid < 2 or time_embed_dim < 1:
+        return None
+    return {
+        "compressed_modulation": True,
+        "adaln_curve_grid": curve_grid,
+        "time_embed_dim": time_embed_dim,
+        "convrot": convrot,
+    }
+
+
 def probe_h3_checkpoint(filename: str) -> dict[str, int | bool | None]:
     """Inspect H3 tensor headers before allocating its 20B/33B network."""
+
+    # Metadata-less GGUFs cannot survive load_metadata_state_dict(); read their
+    # tensor table directly so the pruned rank-8 width is detected instead of
+    # silently defaulting to 2688. See _probe_gguf_h3_checkpoint().
+    if filename.lower().endswith(".gguf"):
+        probed = _probe_gguf_h3_checkpoint(filename)
+        if probed is not None:
+            return probed
 
     state_dict, metadata = quant_router.load_metadata_state_dict(filename)
     quantization_format = str(
