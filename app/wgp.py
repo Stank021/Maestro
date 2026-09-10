@@ -7658,7 +7658,16 @@ def generate_video(
                 dtype_policy=transformer_dtype_policy,
             )
             if _primary_filename and len(_primary_filename) > 0:
-                _local = get_local_model_filename(_primary_filename)
+                # Ask the same resolver load_models will use. The plain
+                # get_local_model_filename() only matches the canonical path,
+                # so any checkpoint that loads through a declared
+                # compatibility alias -- e.g. the H3 pruned FP8 transformer,
+                # logged as "scaled FP8 (legacy compatible)" -- looked absent
+                # and announced "Downloading model ... (first use)" for a file
+                # that was already on disk and loaded instantly.
+                _local = get_compatible_local_model_filename(
+                    _primary_filename, model_type
+                )
                 _needs_download = (_local is None)
         except Exception:
             pass  # never let a UX-only check block generation

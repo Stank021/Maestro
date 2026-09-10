@@ -304,6 +304,128 @@ MODEL_REGISTRY = {
             "--cache-type-v", "q4_0",
         ],
     },
+    "HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF": {
+        "label": "Qwen3.8 27B Uncensored Aggressive (Vision)",
+        "gguf_file": "Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf",
+        # Same Qwen3 thinking problem as the 3.6 entry below: it reasons by
+        # default, _prepare_thinking() has no "qwen" branch, so reasoning is
+        # unbudgeted and content comes back empty on structured planner calls.
+        "disable_thinking": True,
+        # mmproj ships in the SAME repo here, so no mmproj_repo override needed.
+        "mmproj_file": "mmproj-Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-BF16.gguf",
+        "weights_gb": 12.8, "mmproj_gb": 0.93, "arch": "qwen3-27b",
+        # Wired 2026-09-03 from a local download; the weights live at
+        # C:\AI\LMM Models\... and are junctioned into ckpts/llm under the
+        # model stem, so _download_gguf() finds them and never hits the network.
+        # NOTE: the release also ships a FastMTP sidecar + a llama.cpp patch.
+        # We use the plain IQ3_M: the stock llama-server (build 10330) has no
+        # FastMTP support, and the base weights already carry the native NextN
+        # head. Do not point this entry at the FastMTP .gguf.
+        "extra_flags": [
+            # -c 32768 with q8_0 KV (2026-09-05, measured -- not estimated).
+            #
+            # WHY NOT SMALLER: "Director planning calls are short" is FALSE.
+            # plan_clip_prompts_and_images() uses BATCH_SIZE = 100, so ALL clips
+            # plus their lyrics go in ONE request, and the planner separately
+            # asks for len(clips) * 700 + 1024 output tokens. A 25-clip song
+            # measured an 11178-token prompt and llama-server refused it at
+            # 8192; 16384 could not hold prompt + output together either.
+            # Context need scales with SONG LENGTH x CLIP COUNT.
+            #
+            # WHY NOT BIGGER: measured on this card, free VRAM after load is
+            # ~800 MB at both 16384 and 55680, but only ~498 MB at 91648 --
+            # and below roughly 600-700 MB free the model SPILLS into shared
+            # system memory and everything collapses about 10x (43 t/s -> 4.2).
+            # The cliff is a wall, not a slope. 32768 covers the largest real
+            # job with margin that survives another process waking up.
+            #
+            # If it ever feels slow, the cause is almost never this number --
+            # it is something else squatting on VRAM. Run sweep-vram.ps1 and
+            # measure before changing anything here. Do NOT drop the KV cache
+            # to q4_0; that was measured slower than f16, and q8_0 costs only
+            # ~2 t/s versus f16 while halving the KV footprint.
+            "-c", "32768",
+            # -ngl 99 = offload EVERY layer. Two earlier guesses (24, then 40)
+            # were both wrong because I assumed ~48 layers, inherited from the
+            # Qwen3.6 comment below. This model has 66. At 40 that left 26
+            # layers on the CPU, which is the whole slowdown -- GPU sat at 18%
+            # utilisation with 7.6 GB of the card idle. His Unsloth Studio
+            # config runs all 66 at ~45 t/s and estimates 14.2 GiB with a 54912
+            # context; at our 16384 it needs less. Use 99 rather than 66 so the
+            # flag stays correct if the layer count ever changes.
+            "-ngl", "99",
+            "-np", "1",
+            "-fa", "on",
+            # KV cache dtype rule (his, from Unsloth Studio measurements):
+            #   small context (<= ~16k)  -> f16   -- faster, and it fits easily
+            #   large context (~55k+)    -> q8_0  -- trade speed for headroom
+            # Set to q8_0 on 2026-09-05: f16 measured too tight on this box in
+            # practice, whatever the estimate said -- H3 and the video stack are
+            # holding VRAM at the same time, which the Unsloth numbers do not
+            # account for. q8_0 halves the KV footprint for a small speed cost.
+            # Do NOT drop to q4_0; that was measured actively slowing it down.
+            "--cache-type-k", "q8_0",
+            "--cache-type-v", "q8_0",
+            # Qwen3.8 carries a native NextN/MTP head in the base weights, and
+            # llama-server build 10330 supports it directly -- "draft-mtp" is a
+            # first-class --spec-type, no FastMTP sidecar and no patched build
+            # required. n-max 2 (default is 3): shallower drafting, higher
+            # accept rate, which suits the short structured planner calls this
+            # slot serves rather than long free-form generation.
+            # MTP kept ON per his instruction 2026-09-05 - it worked fine with
+            # this exact config before. My same-day A/B suggested MTP was slow on
+            # structured output, but it compared two DIFFERENT llama-server
+            # processes at different VRAM headroom (MTP-on run had ~470 MiB free,
+            # near spill), so it was confounded. Do not remove these without a
+            # clean single-server toggle test he has approved.
+            "--spec-type", "draft-mtp",
+            "--spec-draft-n-max", "2",
+        ],
+    },
+    "huihui-ai/Qwen3.8-Flash-Next-abliterated-Huihui-GGUF": {
+        "label": "Qwen3.8 Flash Next Abliterated (Vision, MoE, experts in RAM)",
+        # Wired 2026-09-08 (Vera). Local files at C:\AI\LMM Models\Qwen3.8-Flash-Next-
+        # abliterated-Huihui, junctioned into ckpts/llm under this stem; the loader
+        # is local-first so nothing is ever downloaded. Split GGUF: name shard 1,
+        # llama.cpp picks up the other three.
+        # WHAT IT IS (GGUF header): arch qwen4exp, 512 experts / 10 used, 48 layers,
+        # hybrid SSM + full attention every 4th layer, ~190B total, a few B active.
+        # 105 GB at Q4 -> cannot live in VRAM. --cpu-moe keeps every expert in
+        # system RAM (needs ~105 GB free RAM; Maestro's own pinned reservation
+        # is released while the LLM runs, the pipeline unloads the LLM before
+        # video generation). Dense path + KV on the GPU: ~9.6 GB VRAM.
+        # WHY THIS MODEL: the real Run It Twice planner prompt (28 clips) came
+        # back as ALL 28 shot objects in one clean array. The 27B above returned
+        # ONE object on the same prompt and the pipeline padded 27 empties.
+        # MEASURED 2026-09-08 (24 threads, 4k/12k prompts):
+        #   experts CPU, ub 512, mmap        : prefill 155-219 t/s, gen 18-21
+        #   experts CPU, ub 2048/b 4096, mmap: prefill 203-358 t/s, gen 16-20
+        #   + --load-mode none (no mmap)     : prefill 391-490 t/s, gen ~22   <- this
+        # 3 layers of experts on the GPU gained ~6% prefill and left 836 MiB
+        # VRAM free - a spill waiting to happen next to H3. Not worth it.
+        # --spec-type draft-mtp: this GGUF has NO MTP layers, server refuses to
+        # start. Do not add it.
+        # -np 1 matters: the default 4 slots quarter the context per request
+        # and prefill dropped to ~80 t/s inside a chat call.
+        "gguf_file": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+        "mmproj_file": "mmproj-model-bf16.gguf",
+        "disable_thinking": True,
+        "weights_gb": 104.0, "mmproj_gb": 0.8, "arch": "qwen4exp-flash-next",
+        "size_hint": "105 GB on disk · MoE, experts stream from system RAM (needs ~105 GB free RAM), ~10 GB VRAM",
+        "extra_flags": [
+            "-c", "32768",
+            "-ngl", "99",
+            "-np", "1",
+            "-t", "24",
+            "-fa", "on",
+            "--cache-type-k", "q8_0",
+            "--cache-type-v", "q8_0",
+            "--cpu-moe",
+            "-ub", "2048",
+            "-b", "4096",
+            "--load-mode", "none",
+        ],
+    },
     "Youssofal/Qwen3.6-27B-Abliterated-Heretic-Uncensored-GGUF": {
         "label": "Qwen3.6 27B Abliterated Heretic (Uncensored, Vision)",
         "gguf_file": "Qwen3.6-27B-Abliterated-Heretic-Uncensored-Q4_K_M.gguf",
@@ -568,11 +690,19 @@ for _repo_id, _info in MODEL_REGISTRY.items():
 _PUBLIC_MODEL_ORDER = [
     "HauhauCS/Gemma4-12B-QAT-Uncensored-HauhauCS-Balanced",
     "HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP",
-    "Youssofal/Qwen3.6-27B-Abliterated-Heretic-Uncensored-GGUF",
+    # Qwen3.6 27B removed from the picker 2026-09-08: superseded by the Qwen3.8
+    # entries below, and its local weights were deleted to reclaim disk. The
+    # registry entry is kept so an old saved project still resolves its label,
+    # but selecting it would re-download ~16 GB, so it is not offered.
+    "HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF",
+    "huihui-ai/Qwen3.8-Flash-Next-abliterated-Huihui-GGUF",         # 2026-09-08: returns all 28 planner shots where the 27B returned 1
     "Nesuwka/gemma-4-E2B-it-heretic-ara-Q4_K_M-GGUF",
     "Abhiray/gemma-4-E4B-it-heretic-GGUF",                         # default (Recommended)
     "Jiunsong/supergemma4-26b-uncensored-gguf-v2",
-    "paperscarecrow/Gemma-4-31B-it-abliterated-gguf",
+    # Gemma 4 31B removed from the picker 2026-09-08: slow on this box, its
+    # mmproj was never downloaded (so no vision despite the label), and the
+    # weights were deleted to reclaim disk. Selecting it would re-download
+    # ~18.5 GB, so it is not offered.
 ]
 
 
@@ -1042,6 +1172,34 @@ def _llama_release_has_assets(release_info: dict, asset_specs) -> bool:
     return True
 
 
+def _tls_context():
+    """TLS context that ignores the Windows certificate store.
+
+    Python's default context calls load_default_certs(), which on Windows
+    ALSO enumerates the system store on top of SSL_CERT_FILE. On this box one
+    certificate in that store is malformed, and OpenSSL 3.6's stricter ASN.1
+    parser rejects the whole batch -- so every HTTPS request from the app venv
+    died with:
+
+        ssl.SSLError: [ASN1: NOT_ENOUGH_DATA] not enough data (_ssl.c:4057)
+        ... in _load_windows_store_certs
+
+    That silently broke the llama.cpp auto-download: llama-server could never
+    be fetched, the Director lost its LLM, and section classification fell
+    back to heuristic labels ("everything is a verse"). Diagnosed 2026-09-05.
+
+    certifi's bundle alone verifies github.com fine, so pin to it and never
+    touch the system store. Falls back to the default context if certifi is
+    missing, which is still better than not trying.
+    """
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return None
+
+
 def _llama_nightly_pointer_url(release_info: dict):
     """Return the official nightly-build pointer from a semantic release."""
 
@@ -1245,7 +1403,7 @@ def _ensure_llama_server(bin_dir: str) -> None:
                 "User-Agent": "Maestro-llama-runtime",
             },
         )
-        with urlopen(request, timeout=15) as response:
+        with urlopen(request, timeout=15, context=_tls_context()) as response:
             payload = json.load(response)
         return payload if isinstance(payload, dict) else {}
 
@@ -1266,7 +1424,7 @@ def _ensure_llama_server(bin_dir: str) -> None:
                 pointer_url,
                 headers={"User-Agent": "Maestro-llama-runtime"},
             )
-            with urlopen(pointer_request, timeout=15) as response:
+            with urlopen(pointer_request, timeout=15, context=_tls_context()) as response:
                 nightly_tag = response.read(64).decode(
                     "utf-8", errors="replace"
                 ).strip()
@@ -1333,7 +1491,7 @@ def _ensure_llama_server(bin_dir: str) -> None:
         archive_path = os.path.join(bin_dir, f"_llama_download_temp{archive_ext}")
         try:
             # Stream download so the user isn't waiting on full buffering
-            with urlopen(asset_url, timeout=600) as r, open(archive_path, "wb") as f:
+            with urlopen(asset_url, timeout=600, context=_tls_context()) as r, open(archive_path, "wb") as f:
                 total_bytes = int(r.headers.get("Content-Length", 0))
                 downloaded = 0
                 chunk_size = 1024 * 1024  # 1 MB chunks

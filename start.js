@@ -53,7 +53,11 @@ module.exports = async (kernel) => {
         params: {
           ...runtimeShell(runtime, { env: selectedEnv, python: selectedPython }),
           env: {
-            SERVER_PORT: port
+            SERVER_PORT: port,
+            // Director shot-length bound. Upstream hardcodes 26 s, validated on other
+            // hardware; this box degrades past ~12 s. 12 gives ~11 s clips, ~20 of them
+            // on a 3:21 song. See services/audio_analysis.py.
+            MAESTRO_MAX_CLIP_SECONDS: "12"
           },
           path: "app",
           message: [

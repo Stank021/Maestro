@@ -207,19 +207,42 @@ class MiniMaxH3Conditioner(nn.Module):
         return input_ids, attention_mask, None, encoded
 
     def _vision_inputs(self, prompt: str, images: list, device: torch.device):
+        # Cap the free-text budget here instead of at the processor call below.
+        # The processor expands each image into hundreds of <|image_pad|>
+        # tokens, so truncating the *combined* sequence severs the
+        # correspondence between the placeholders in the text and the ids, and
+        # transformers rejects it with "Mismatch in `image` token count between
+        # text and `input_ids`". At 704p the expansion fitted inside the old
+        # max_text_tokens + 4096 budget; at 1080p it needs ~6100 and every
+        # render died before the first step. Bound the prose, never the
+        # pictures. Prompts under the limit are passed through untouched so
+        # existing seeds keep reproducing.
+        text_ids = self.tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        if len(text_ids) > self.max_text_tokens:
+            prompt = self.tokenizer.decode(
+                text_ids[: self.max_text_tokens], skip_special_tokens=False
+            )
         presentation = "".join(
             f"<Picture {index + 1}>: <|vision_start|><|image_pad|><|vision_end|>"
             for index in range(len(images))
         ) + prompt
-        encoded = self.processor(
-            text=[presentation],
-            images=images,
-            add_special_tokens=False,
-            padding=False,
-            truncation=True,
-            max_length=self.max_text_tokens + 4096,
-            return_tensors="pt",
-        ).to(device)
+        # wgp.py calls torch.set_default_device(gpu) process-wide, so the
+        # HuggingFace image processor's ordinary CPU-side tensor work -- notably
+        # torch.stack() inside group_images_by_shape() -- allocates in VRAM. With
+        # the 33B transformer already holding the card that raises
+        # "CUDA error: out of memory" from inside image preprocessing, which
+        # reads as a model-too-big failure and is not one. Pin preprocessing to
+        # the CPU where it belongs, then move the finished batch to the device.
+        with torch.device("cpu"):
+            encoded = self.processor(
+                text=[presentation],
+                images=images,
+                add_special_tokens=False,
+                padding=False,
+                truncation=False,
+                return_tensors="pt",
+            )
+        encoded = encoded.to(device)
         input_ids = encoded["input_ids"]
         attention_mask = encoded["attention_mask"].bool()
         return input_ids, attention_mask, None, encoded

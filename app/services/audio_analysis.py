@@ -1128,8 +1128,18 @@ def _find_speaker_change_beats(
     return change_points
 
 
-MAX_CLIP_SECONDS = 26.0  # user-validated single-window length on LTX-2.3 (was 22)
-MIN_CLIP_SECONDS = 8.0   # don't create clips shorter than this
+# Clip-length bounds for the Director's shot planner.
+#
+# LOCAL DEVIATION: upstream hardcodes 26.0 as a "user-validated single-window
+# length on LTX-2.3" -- but that was validated on other hardware. On this box
+# (RTX 5080 Laptop, 16 GB) clips render comfortably up to ~12 s and degrade badly
+# beyond it. Made env-tunable rather than re-hardcoded so it can be dialled per
+# song without editing code, and so an upstream merge conflicts legibly.
+#
+#   MAESTRO_MAX_CLIP_SECONDS=12  ->  ~20 clips of ~11 s on a 3:21 song
+#   MAESTRO_MIN_CLIP_SECONDS      ->  floor; effective_max never drops below MIN+2
+MAX_CLIP_SECONDS = float(os.environ.get("MAESTRO_MAX_CLIP_SECONDS", "26.0"))
+MIN_CLIP_SECONDS = float(os.environ.get("MAESTRO_MIN_CLIP_SECONDS", "8.0"))
 
 
 def plan_clip_structure(
