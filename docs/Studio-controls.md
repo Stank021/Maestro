@@ -1,0 +1,62 @@
+# Studio controls
+
+On mobile, the gallery header centers the Maestro icon, name and version.
+The sidecar menu stays on the left, with Queue and Settings on the right.
+Open the sidecar to switch between Director, Studio and Editor.
+
+Choose Video, Image or Audio and a workflow at the top of Studio. The complete workflow list opens over the editor. The media tabs, workflow selector, references and prompt share one vertically scrollable area. Short prompts fill the available writing space; long prompts expand with their text. Choose the model beside Generate at the bottom. The app header, settings strip, generation controls and hardware status stay outside this scroller.
+
+The fixed settings strip keeps Characters on the left and groups Recipes, Resolution, Aspect, Duration and Advanced together on the right, with Recipes immediately beside Resolution. Advanced becomes an icon with its active count when the sidebar is narrow, and the output indicators keep their values without decorative icons. In the smallest layouts, Characters also uses its icon so the controls remain separate and tappable. Indicators show the current choices; Auto duration shows its recommended length below a small Auto label and updates as the recommendation changes. The Auto toggle's tooltip also previews the recommendation before enabling it. Resolution and Aspect open lists sized to their labels, directly above the clicked button on desktop and mobile, without redundant headings. Selecting a value closes its list; keyboard users can use the arrow keys, Home/End and Escape. The options still come from the selected model, including Auto and model-specific tiers. Duration and Advanced retain their detailed overlays. Opening a setting does not resize the prompt or move Generate. Click another indicator to switch panels or click outside to dismiss.
+
+Video Duration has **Time** and **Window** tabs. The **Auto** toggle and current duration stay visible above both tabs. Enabling Auto from either view returns to Time and follows the automatic recommendation. The time slider, presets and custom time entry appear dimmed but remain interactive: grabbing the slider, adjusting it with arrow keys, choosing a preset or editing the timecode turns Auto off immediately. You can also turn Auto off explicitly. Time uses the model-aligned slider through five minutes, or **10m, 15m, 30m, 60m or Custom** where supported. Window retains its exact count presets, slider and number field. Adjustable **Window Length** stays visible and automatically follows shorter durations up to the GPU recommendation or saved/manual limit. Automatic sizing continues while the popup is closed. Window overrides and saved GPU/model preferences work as before. **Window overlap** starts collapsed in both tabs and opens when needed; unsupported overlap controls remain hidden. H3 Reference sequences keep their **Carry motion and sound between windows** option here. Speech and Director retain their specialized duration controls.
+
+On mobile, settings overlays fit within the sidebar. Video Duration opens directly above its button with a compact, steady height while values change. Additional controls scroll inside it. Sequence details sit below the sliders, so switching between one window and a longer sequence does not move the slider you are adjusting. The panel follows its button when the keyboard or available screen size changes. Close it with Escape, its indicator, or a click outside.
+
+## Characters and media
+
+**Characters** uses the same person icon in Reference, supported Image, Viggle and Speech workflows. It opens the saved library beside the sidebar on desktop and in a sheet on mobile. A Reference character remains one card containing its appearance and voice. Speech uses its saved voice; Image uses chosen original or recovered views. Viggle can prepare a character replacement frame or accept a manually edited frame.
+
+Reference mode shows compact input cards and keeps one **Add reference** drop zone while the selected model has room. Drop files or tap to choose them. Click a card to open its detailed settings: preview, replace or describe a reference, choose an image/audio role, attach a video soundtrack, or adjust background isolation. These controls open over the editor. The arrow controls reorder inputs on touch screens; reference labels update with their order. Saved character appearance and voice move together. Larger input collections grow with their contents and scroll together with the prompt.
+
+Frames and Extend use the same compact, three-column tile layout as Reference mode, including on mobile. They keep their specific input roles: source video, start/end/timed frames, control video, soundtrack and supported references. Tiles wrap instead of scrolling sideways. Frame positions and per-input settings stay with their inputs. Image and Viggle keep their model-specific source/mask and preparation controls. Files still count against each model's real limits.
+
+## Advanced
+
+**Advanced** opens directly above its button on desktop and mobile, within the sidebar and clear of Generate. Its contents scroll when necessary. Expand any combination of sections; their open state, settings and unfinished preset drafts are retained when the overlay is closed. Sections with no applicable controls are hidden. Available options still appear when switched off. When a model does not accept additional LoRAs, **Presets** remains available to save and restore its settings.
+
+- **Performance:** H3 optimizations, reference preparation detail, applicable text encoders/decoders and cache tuning. Existing compatible settings and defaults are retained.
+- **Finishing:** face refinement, H3 audio refinement and supported post-processing, including scaling, temporal upsampling, grain and voice replacement.
+- **LoRAs & presets:** creative adapters, strengths and saved setups.
+- **Generation:** seed, guidance, inference steps, output count and other applicable model controls.
+
+Each section heading shows a circular badge when it has active settings, including while collapsed. For example, one enabled adapter gives **LoRAs & presets** a **1** badge. The Advanced button totals the same section counts; badge tooltips list the settings. Controls located elsewhere, such as video's Window Length override in Duration, do not add to Advanced's count. **Face refinement & character mapping** in the Reference character library opens the same Finishing settings. Gallery face refinement remains available for previous videos.
+
+The green LoRA info button opens its usage guide. Guides stay within the visible screen, including with the mobile keyboard open, and long text can be scrolled. Hover for a quick look or click/tap to keep the guide open. Escape dismisses the guide first, leaving Advanced open; tapping elsewhere or pressing the info button again also dismisses it. The same guide behavior is shared by Studio and Director's LoRA pickers.
+
+## Prompt and actions
+
+The prompt fills the available composition area without a label or expand button. It grows to fit longer scripts and shrinks again when text is removed, without its own scrollbar. Scroll anywhere over the prompt or references to move through the shared sidebar area, including the mode controls at the top. Its text width stays steady as content grows or background status updates arrive. The active caret line stays visible while typing or navigating a long script.
+
+The magic button at the bottom-right explicitly enhances the prompt using **AI Faithful**, preserving the supplied events and dialogue. Its small arrow opens two choices: **AI Faithful** or **AI Creative**, which can add story beats and dialogue. The main button always uses Faithful, including after a Creative enhancement. Review or edit the result before submitting. Generate and Add to Queue use the visible prompt without running an unseen enhancement pass; old saved Manual/Auto/Creative choices no longer change that behavior. Speech retains its separate speech/dialogue enhancement menu in the same place.
+
+In Image mode, Faithful clarifies the supplied description; Creative can add complementary visual details. Both keep explicit facts, character/reference constraints, requested text and edit boundaries. Restart a running backend after updating to activate the image enhancement instructions, then refresh the browser for the rebuilt controls.
+
+For a long H3 sequence, Enhance prepares the individual window prompts. **Exact H3 prompts** opens their review screen, where each prompt remains editable. For LTX, enhancement writes one line per window directly in the prompt field. You can also choose a duration/window count and write those lines yourself. A missing window prompt produces an actionable message instead of triggering AI at submission. Auto duration estimates from the story or timed media; an old prompt-mode setting does not reinterpret paragraphs as separate windows. Previously queued jobs retain their original behavior.
+
+The **Recipes** book icon between Characters and Resolution opens saved generation setups directly. The **Model Browser** globe beside the model selector opens browsing directly. Browse is also available inside the model picker. Generate keeps its two-part action: the left side generates now, and the right third adds the current settings to the held queue when supported. Transform and Blend retain their existing queue limitations. Specialized audio and finishing tools retain their dedicated composers or Run actions.
+
+All three theme families, their light/dark variants and Auto appearance remain available in Settings. On mobile, the sidebar follows both the height and vertical offset of the visible viewport, and the document behind the open drawer is held in place. Keyboard detection also handles browsers that reduce the window height along with the visible viewport. The workflow header, reference area and hardware status temporarily tuck away while the keyboard reduces the available height, leaving room to write without changing saved preferences. An input section containing the focused text field stays visible. Compact menus also follow their buttons when the keyboard moves the viewport.
+
+When editing a video frame in Image mode, the return banner keeps its title and actions while its help text tucks away during typing. On short desktop and mobile screens, the composer keeps a usable minimum height and the sidebar body scrolls above the fixed generation controls. Focusing a field or moving the keyboard reveals the active line inside the sidebar, including Animate's appearance controls, without scrolling the gallery behind it.
+
+## Local validation
+
+After building `ui`, run `node tests/ui/sidebar_redesign.cjs http://127.0.0.1:<Maestro port>`. The suite reads only the running app's model catalogue and model options. All browser writes, uploads, generations and enhancements are intercepted at an isolated test origin. It checks layouts, menus, simulated keyboard height/offset changes, and explicit enhancement/submission behavior. Screenshots are saved under `.codex-tmp/sidebar-validation/`. Set `MAESTRO_UI_ENHANCE_ONLY=1` to run just the enhancement checks during development. Keyboard geometry is simulated in Chromium; real iOS keyboard animation still needs device validation.
+
+Additional existing checks cover Studio duration convergence, saved H3 LoRA settings, character recovery/picking, and automatic/manual Viggle submissions. These UI checks do not run a GPU generation.
+
+Set `MAESTRO_UI_DURATION_ONLY=1` to run the duration popup checks alone. They drag the sliders across single/multiple-window boundaries with manual and automatic window sizing, verify sidebar bounds at desktop and mobile widths, and exercise scrolling and a simulated keyboard viewport.
+
+Set `MAESTRO_UI_KEYBOARD_ONLY=1` to check the Animate-to-Image frame editor and Animate appearance field at 390px and 320px widths. It verifies typing, caret visibility, sidebar scrolling and the return action while simulating both visual-viewport-only and window-height keyboard changes.
+
+Set `MAESTRO_UI_SCROLL_ONLY=1` to check the combined sidebar scroller, including short desktop windows and expanded hardware status. It exercises mouse-wheel scrolling over the prompt, growing/shrinking scripts, stable sizing during status polling and writing-extension updates, pinned actions, and mobile caret visibility while the keyboard changes size.

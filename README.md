@@ -1,6 +1,6 @@
 # Maestro
 
-A one-click AI **video, image, and audio studio** for creators. Maestro pairs a modern React UI with a powerful generation backend and adds a **Director mode** that uses an LLM to plan music videos and short films from a single prompt. Optimized for LTX-2.5, MiniMax H3, and the latest local creative models and LoRAs.
+A one-click local AI **creative studio, director, and video editor** for creators. Maestro combines a modern interface with powerful image, video, and audio generation, an LLM-directed production workflow, and a non-destructive multi-track editor. Optimized for LTX-2.5, MiniMax H3, and the latest local creative models and LoRAs.
 
 ![Maestro UI](Maestro_UI_02.jpg)
 
@@ -23,19 +23,30 @@ Detects your GPU, VRAM, and RAM on first launch and picks the right profile, qua
 
 ### 🎨 Studio Mode — full manual control
 Direct access to every model and every knob:
-- **Video** — MiniMax H3 and LTX-2.5 with native synchronized audio, LTX-2.3, Wan1/2, Hunyuan, and many more.
-- **Image** — Flux 2 Klein 9B, Krea 2 RAW/Turbo and Identity Edit, Qwen Image Edit, and many more
-- **Audio** — TTS: Kugelaudio, Qwen3 TTS. Music: MiniMax-Music3 and ACE-Step. SFX: MMAudio
+- **Video** — create, extend, blend, retake, edit anything, outpaint, repaint, recast, upscale, and finish clips with MiniMax H3, LTX-2.5/2.3, SCAIL-2, Wan, Hunyuan, and many more.
+- **Image** — create, edit, upscale, or outpaint with Flux 2 Klein 9B, Krea 2 RAW/Turbo and Identity Edit, Qwen Image Edit, and more.
+- **Audio** — generate music with MiniMax-Music3 or ACE-Step, speech and cloned voices with H3 Voice Audio, Kugelaudio or Qwen3 TTS, sound effects with H3 or MMAudio, and revoice existing clips.
 - **Multi-clip generation** with per-clip prompts, seamless overlapping (sliding window) transitions, and shared LoRAs
+- **Long-form planning up to 60 minutes** with one-window, friendly duration, exact timecode, window-count, and Auto controls; Faithful or Creative AI can plan each independent window
 - **Blend video Mode** Remember Sora 1 blend mode, where you could overlap two videos, and use AI to blend them together? 
 - **Frames Injection (KFI)** for character continuity in long videos
 - **Sliding window** for arbitrarily long generations
+- **Viggle Animate:** select a saved character or image, describe its appearance, and let Flux 2 Klein prepare the replacement frame before three-step H3 animation. Preview the frame first or run both steps together; manual edited frames remain supported. See [Viggle Animate](docs/Viggle-Animate.md).
+- **Studio composition workspace:** compact reference cards above a large prompt editor. Characters stays on the left; Recipes, Resolution, Aspect, Duration and Advanced group on the right. The model selector sits beside Generate / Add to Queue, with a direct Model Browser shortcut. The magic button explicitly enhances with AI Faithful or Creative before submission. Advanced groups Performance, Finishing, LoRAs and Generation. Time retains model-aligned steps through five minutes and presets through one hour; Auto shows its recommended duration. See [Studio controls](docs/Studio-controls.md).
 - **Spatial upsampling, film grain, codec selection** as post-processing options
+- **H3 VDN**, an optional trained hybrid-attention model with dedicated Full/Pruned and eight-step presets; requires Triton and additional VRAM.
+- **H3 Voice Audio** for speech, one/two-reference voice cloning and general audio: up to 45 seconds per segment and five minutes per assembled output. See the [H3 audio guide](docs/H3-Voice-Audio.md). **H3 Outpaint** extends video borders; an optional six-step **H3 Audio Refinement** pass holds the generated video fixed.
+- **Saved characters in every Speech workflow:** reuse Reference-mode character voices, save new characters from Speech, and restore character bindings with output settings. Qwen preset/design variants offer an explicit switch to voice cloning. See [TTS characters](docs/TTS-Characters.md).
+- **Portable characters with voice:** share `blaine.maestro.safetensors` files with appearance and saved audio embedded. Model Browser → Characters / RefMods adds file and Hugging Face imports, voice filters, and easy export. Standard H3 RefMods retain their original visual latents. See [Character sharing and RefMods](docs/Maestro-Characters.md).
+- **Better character images:** recover native-resolution PNG views from RefMods, choose a cover, and download selected images individually or as a ZIP. Original photos/video frames are used when available; selected PNGs and the cover travel with shared Maestro characters.
+- **Characters in Image mode:** add saved characters and recovered RefMod views to models that accept image references. Choose specific views, keep source/reference order, and describe clothing or other appearance changes in the image prompt.
+- **H3 Face Refiner:** automatically refine up to five tracked faces after generation, or use **Refine faces** on a gallery video. Preview face thumbnails, map saved characters and RefMods, or skip individual faces. Saves a new copy with the original resolution and soundtrack. See [H3 Face Refiner](docs/H3-Face-Refiner.md).
+- **Media Flow** batches image/video finishing and video outpainting. RIFE 4.26 supports x2/x3/x4 frame rates. Optional **DLSS 5 Neural Rendering** and **DLSS Frame Generation** integrate with generation postprocessing and finishing tools on supported Windows 11/RTX systems. See the [DLSS installation guide](docs/DLSS5.md) and [port plan, validation and testing instructions](docs/development/wan2gp-12-71-port-plan.md).
 
 ### 🤖 Local LLM — built-in, no setup
 Maestro auto-downloads `llama-server` (~600 MB one-time) and your chosen GGUF model on first use. Defaults to **Gemma 4 4B (Recommended)** — fast, capable, and runs comfortably on smaller GPUs. Auto-detects CUDA and binds the LLM to GPU when available.
 
-- Pre-curated registry: Gemma 4 (2B / 4B / 26B MoE / 31B) and Qwen3.6 27B — uncensored/abliterated instruct variants tuned for creative prompting
+- Pre-curated registry: Gemma 4 (2B / 4B / 26B MoE / 31B), Qwen3.6 27B, and **Qwen3.8 27B Uncensored** with model-aware deep thinking for creative writing and prompt enhancement
 - **External providers** also supported: OpenAI, Anthropic, custom OpenAI-compatible endpoints (currently experimental)
 - **Vision support** so LLMs can enhance prompting based on reference images
 - Auto-unloads after 60s idle to free VRAM for video gen
@@ -56,15 +67,20 @@ Three theme families, each with a dark and a light variant, switchable in Settin
 
 Appearance mode is **Dark / Light / Auto** — Auto follows your system's appearance and switches live when it changes.
 
-### 🛠️ Edit Mode
-- **Retake** — re-roll a section of an existing video with a new prompt
-- **Edit Anything** — modify, add, or remove elements from existing videos using text prompts and In-Context LoRA models
-- **Outpaint** — extend a video's frame in any direction while preserving its original action, timing, and audio
-- **Repaint** — use SCAIL-2 to repaint characters, objects, or scenes while retaining the source motion and camera work
-- **Recast** — map one or more people in a video to replacement characters, including multi-shot scenes and group shots
+### ✂️ Editor Mode — finish the story on a timeline
+- Arrange video, audio, and title layers on a non-destructive multi-track timeline with snapping, trim, split, duplicate, undo/redo, transitions, speed, opacity, volume, and canvas transforms.
+- Browse outputs across workspaces, uploads, favorites, and complete Director productions; import Director shots as individual clips with their original soundtrack.
+- Send a selected clip back through Maestro AI, then return the generated take to the same timeline position without rebuilding the edit.
+- Export H.264, H.265, or AV1 at project or delivery resolutions with automatic hardware-encoder selection and export history.
+- Responsive desktop and mobile layouts keep core editing controls usable from a phone or tablet.
 
 ### 📂 Workspaces
 Multiple isolated output directories with a quick switcher in the sidebar. Useful for separating client projects, NSFW vs SFW, or experiments. Pinned and favorited outputs are tracked per workspace.
+
+### 🔔 Completion alerts and private phone access
+- In-app alerts, optional browser notifications, per-device chimes, and a host-computer completion sound are available under **Settings → Notifications**.
+- Encrypted Web Push can notify an installed iPhone/iPad Home Screen app or supported desktop browser even after Maestro is closed.
+- Optional **Tailscale Serve** support gives each user a private, trusted HTTPS address for Maestro using their own Tailscale account. It is restricted to that user's tailnet—Maestro never enables public Tailscale Funnel access and does not operate a cloud relay.
 
 ### 🔒 Mature mode + experimental gate
 - **NSFW mode** is opt-in with a disclaimer step. Disabled by default. Gates uncensored model variants, NSFW LoRAs in the CivitAI browser, and the Settings → Services NSFW toggle.
@@ -76,6 +92,123 @@ View all past Director runs with their full state — clip plans, generated imag
 ## Updates
 
 The version you are running is shown next to the Maestro title in the UI. To update, use the launcher's Update button in Pinokio.
+
+### v2.1.1 (2026-09-08)
+
+**Fuller AI Creative dialogue and clearer troubleshooting**
+
+- **More complete conversations:** Creative uses the available speech time for developed exchanges. H3 checks explicit talking-point lists against spoken dialogue and repairs inadequate windows individually, preserving successful repairs elsewhere.
+- **Reliable character names:** H3 ignores pronouns such as "They" when identifying cast, and matches unambiguous RefMod filenames to the character names in your prompt for consistent Subject and voice bindings.
+- **Visible planning feedback:** unresolved H3 warnings appear in the normal Studio prompt area, including mobile. Refresh keeps a plan in AI Creative or AI Faithful instead of silently switching Creative to Faithful.
+- **Correct log instructions:** the bug-report form and contributing guide now point to the correct files. See [Finding logs](#finding-logs) for startup, update, install and local LLM logs, plus alternatives when no log file exists. Fixes issue #118.
+
+See the [v2.1.1 release notes](docs/RELEASE_NOTES_V2.1.1.md). Run AI Creative again on an existing draft to apply the revised dialogue planning.
+
+### v2.1.0 (2026-09-08)
+
+**A larger Studio workspace, portable characters and new H3 tools**
+
+#### Studio: more room to create
+
+- **One scrolling workspace:** media tabs, workflow selection, reference tiles and the prompt scroll together. Long prompts grow with their text; settings and **Generate / Add to Queue** stay pinned.
+- **Compact controls:** Characters, Recipes, Resolution, Aspect, Duration and Advanced leave more room to write. Setting lists open above their buttons; the model selector sits beside Generate, with a direct Model Browser shortcut.
+- **Clearer Advanced settings:** collapsible Performance, Finishing, LoRAs and Generation sections show active-count badges and hide empty sections. Director's H3 Video LoRAs regain editable weights, including restored settings.
+- **Consistent mobile layout:** matching input tiles, a centered gallery header and viewport-bounded LoRA guides. All three theme families and their light/dark variants remain supported. [Studio controls](docs/Studio-controls.md).
+
+#### Prompt enhancement and duration
+
+- **Enhance before generating:** the magic button runs **AI Faithful**; its menu also offers **AI Creative**. Review and edit the result before submission. Both support image prompts; long H3 sequences expose editable **Exact H3 prompts** for each window.
+- **Stronger Creative dialogue:** conversations, tutorials and character interactions receive duration-aware dialogue targets, with a focused retry for sparse drafts. Planning targets **2.8 words/second**, allows up to **3**, and supports up to six H3 speaker turns per window. Faithful preserves supplied events and lines.
+- **More accurate speech budgets:** action descriptions, production headings and mixed dialogue formats no longer inflate the spoken-word count. Explicit silence and requests to use only supplied lines remain respected.
+- **Simpler Studio and Director duration controls:** Auto previews its recommendation in both Time and Window views. Moving the dimmed slider or choosing a preset switches to manual. Model-aligned Time steps reach **five minutes**, with **10m, 15m, 30m, 60m and Custom** presets for supported video workflows. Window sizing follows model/GPU limits or saved overrides; overlap is collapsed by default.
+- **Consistent optional guidance:** single- and multi-window enhancement share the optional Mature-mode content guide only when that mode is enabled. A [14.4-second-window Reference tutorial example](docs/prompts/blaine-maestro-tutorial-script.md) includes native dialogue tags and presenter cues.
+
+#### Portable characters, RefMods and better reference images
+
+- **Share complete characters:** export **`<character>.maestro.safetensors`** with appearance, saved voice, name/description and selected images. Import standard H3 RefMods separately from trained LoRAs; compatible upstream loaders can use the visual portion, while embedded voice is a Maestro extension.
+- **Browse and reuse identities:** Model Browser adds **Characters / RefMods**, local and Hugging Face imports, voice filters, a saved **malcolmrey / MiniMax H3** collection and easy export. Multiple RefMods retain separate identities and voice bindings, with improved name/speaker matching.
+- **Recover better images:** decode native-resolution PNG views, choose a cover and download individual images or a ZIP. Original photos/video frames are preferred when available; cached recovery preserves the original latent and audio. Selected views travel with exports and work in Image models that accept references.
+- **Better character browsing:** scrollable mobile galleries, cached video thumbnails and cleaner display names make characters easier to identify. [Character sharing and recovery](docs/Maestro-Characters.md).
+
+#### Viggle Animate and automatic character replacement
+
+- **Three-step H3 animation:** supply a control video and an edited frame from **any point in the source video**. Longer videos use overlapping windows of approximately **5.2 seconds**.
+- **Automatic character preparation:** choose a saved character, recovered RefMod view or uploaded image. Flux 2 Klein replaces the subject in the selected frame, with editable appearance instructions. Preview first or queue preparation and animation together; Klein **9B and 4B** are supported.
+- **Manual editing stays available:** send the frame to Image mode, edit it and use **Apply & return**. Saved settings retain frame time, character view and preparation choices. Appearance prompts control preparation; Viggle uses its fixed motion-transfer recipe. [Viggle Animate guide](docs/Viggle-Animate.md).
+
+#### H3 Voice Audio and saved voices throughout Speech
+
+- **Speech, voice cloning and sound:** H3 Voice Audio — Pruned produces **32 kHz stereo audio**, with up to **45 seconds per generation** and **five minutes per assembled output**. `Sound:` prompts support effects and ambience.
+- **Longer conversations:** one or two voice references, named speaker turns, delivery cues and returning-speaker voice reuse work with boundary trimming. Duration is a ceiling; oversized scripts are checked before queueing, and cancelled jobs do not publish partial audio.
+- **Saved characters across Speech:** reuse character voices, save new characters from Speech and restore names/reference bindings with output settings. Each model retains its speaker limits; Qwen preset/design variants offer a switch to voice cloning. [H3 Voice Audio](docs/H3-Voice-Audio.md) · [TTS characters](docs/TTS-Characters.md).
+
+#### H3 generation and refinement
+
+- **VDN Full/Pruned and eight-step presets:** an optional trained hybrid-attention path requiring **Triton and additional VRAM**, with its own compatible adapters. Performance depends on the hardware and workload.
+- **LoRAs on Fused 4-Step:** compatible H3 character, style and concept LoRAs now work in Frames, References and Director while retaining the four-step recipe. Support remains experimental; acceleration/VDN adapters and unsupported DoRA are excluded. [Fused H3 LoRAs](docs/H3-Fused-LoRAs.md).
+- **H3 Outpaint:** expand video borders with protected source content, preserved source audio, multi-window processing and batch support.
+- **Audio Refinement Extra Phase:** optionally add **six audio-refinement steps** while locking the generated video latents. Fixed PDD/fused recipes and FL2VA source-soundtrack control are excluded.
+- **Face Refiner:** detect, track and refine **up to five faces** automatically through **Advanced → Finishing**, or on an existing gallery video/upload. Map saved characters or RefMods, retain an identity or skip a face. A new copy preserves source resolution, frame count, FPS and soundtrack. [Face Refiner guide](docs/H3-Face-Refiner.md).
+
+#### Media Flow, temporal upsampling and optional DLSS
+
+- **Batch finishing:** Media Flow processes image/video collections through the shared queue with per-file progress, cancellation and saved settings while retaining source files.
+- **Smoother video:** RIFE 4.26 adds **x3** alongside **x2/x4**, preserving duration and soundtrack. Optional DLSS Frame Generation offers **x2–x4** on supported RTX 40/50 systems, and **x5/x6** where supported on RTX 50.
+- **DLSS 5 Neural Rendering:** use **x1** refinement or **x1.5–x3** enlargement with adjustable intensity and depth/motion controls. Native DLSS requires a **separate installation on compatible Windows 11/RTX hardware**; RIFE does not. Native DLSS quality/performance still need validation on supported hardware. [Requirements and installation](docs/DLSS5.md).
+
+#### Fixes and polish
+
+- Fixed the **H3 Extend model-switch crash / React error #185**, prompt resizing and scrollbar flicker, and unintended Director horizontal scrolling.
+- Fixed mobile keyboard access to prompts, overlapping settings, off-screen LoRA guides and duration popups whose sliders jumped while dragging. The gallery stays in place behind the open sidecar.
+- Improved the mobile Model Browser and added a manual **Destination LoRA folder** for URL imports, with an automatic best-match suggestion.
+- Improved shared GPU offloading, cancellation and settings restoration; fixed locked ETA-history databases on Windows and expanded model, character, dialogue and UI regression coverage.
+
+#### Updating
+
+Use **Update** on Maestro's Pinokio page, start normally and refresh the browser.
+Existing models, outputs, workspaces, characters, presets and Director/Editor
+projects stay in place. Update installs the Face Refiner detector dependency;
+new model assets download when needed, and DLSS uses its separate installer.
+
+See the [complete v2.1.0 release notes](docs/RELEASE_NOTES_V2.1.0.md) for detailed
+behavior and compatibility, and the [validation record](docs/VALIDATION_V2.1.0.md)
+for completed checks and remaining hardware/device testing.
+
+### v2.0.1 (2026-09-04)
+
+**Stability and exact workflow restoration**
+- Fixed GitHub issue #97, where an LTX Auto-duration feedback loop could flash the interface and leave a black screen after updating to v2.0.0.
+- Fixed Video Extend window math so one requested continuation window cannot become a full pass plus a tiny second pass. The duration UI, prompt count, and runtime now agree on how much new footage the source-overlap pass contributes.
+- Fixed **Extend this video** on gallery clips so it opens Studio Extend and places the selected clip in the source drop zone, including on mobile.
+- Fixed H3 AI Faithful dialogue inflation caused by an instructional `<d>` marker being interpreted as the start of a giant spoken line. Auto-expanded jobs now plan from the user's original prompt instead of reparsing an already enhanced Context-IR prompt.
+- Rebuilt **Load Settings** as a complete round trip across Studio generation, transform, audio, finishing, Mixer, Director, and Editor workflows—including source media, references, masks, anchors, LoRAs, H3 optimizations, and workflow-specific controls.
+- Added single-window generation time to expanded gallery details and a dedicated Copy button for Original Prompt.
+- Expanded sidecar fidelity and portable release validation so older outputs restore safely and incompatible settings from the previously viewed output cannot leak into the next run.
+
+See the [complete v2.0.1 release notes](docs/RELEASE_NOTES_V2.0.1.md).
+
+### v2.0.0 (2026-09-03)
+
+**A complete create-to-edit workflow**
+- Added the new full-screen **Editor Mode** with multi-track video, audio, and title editing; 21:9 canvases; canvas transforms and snap guides; transitions, speed, opacity, volume, fonts, undo/redo, project history, and hardware-aware export.
+- Director productions can be opened as editable timelines with separate shot clips and the complete soundtrack, while any timeline clip can make a round trip through Maestro AI and return as a new take.
+- Reorganized Studio into clear Video, Image, and Audio workflows. Video editing tools now live beside generation, Image adds dedicated New/Edit/Upscale/Outpaint modes, Audio includes Revoice, and Finish adds reusable film grain.
+- Added unified long-form planning up to 60 minutes with duration presets, exact timecodes, direct window counts, media/story-aware Auto duration, and Faithful or Creative AI window prompts. Frequently used Studio modes, models, planning choices, and H3 optimizations now survive restarts.
+
+**MiniMax H3, references, and local intelligence**
+- Added H3's native 768p tier, 21:9 canvases, and Regenerate 2K workflow, plus Alibaba PAI FL2VA and Ref2VA acceleration presets with native PDD support.
+- Added optional experimental **H3 Fused 4-Step** Frames and References models. Both share one pinned INT8 ConvRot checkpoint, default to the published four-evaluation recipe, expose 4-8 Total Steps, and use SLA sparse attention with a safe dense fallback.
+- Added a reusable Omni character library for named image + voice or video references, automatic reference-duration budgeting, and stronger reference isolation so identity media is not mistaken for a start frame. Exact Subject/Speaker bindings keep each character's face, voice, and dialogue together and reject phantom subjects.
+- Rebuilt H3 prompt planning around causal story continuity, exact dialogue preservation, official Context-IR guidance, model-aware token fitting, and safer multi-window continuation. Faithful Studio planning now keeps the user's event/dialogue schedule authoritative while the LLM concentrates on cinematography.
+- Added Qwen3.8 27B Uncensored with creative thinking controls, prompt-enhancement telemetry, and non-thinking structured-output paths.
+
+**Remote workflow and release polish**
+- Added completion alerts, optional chimes, encrypted closed-app Web Push, an installable Maestro web app, and optional private HTTPS access through each user's own Tailscale account. Windows restores opted-in Tailscale access after Maestro restarts without repeated approval prompts.
+- Added per-clip, multi-window, and full Director completion estimates, including cache-aware calibration for First Block Cache and private local timing history for more accurate future estimates.
+- Expanded gallery details and search across model, resolution, LoRAs, H3 optimizations, prompts, window counts, and generation timing, while making the viewed or playing clip the reliable active Studio target.
+- Updated Maestro's orange app icon, unified the responsive Director / Studio / Editor header and version display, added Director first-frame thumbnails and full-rate iOS Editor preview playback, simplified the Pinokio menu, and preserved the v1.9.1 llama.cpp nightly-download hotfix.
+
+See the [complete v2.0 release notes](docs/RELEASE_NOTES_V2.0.md) and [Tailscale setup guide](docs/TAILSCALE_REMOTE_ACCESS.md).
 
 ### v1.9.1 (2026-08-25)
 
@@ -706,14 +839,57 @@ Click **Reset** to wipe the install and start over. Removes `app/env/`, `app/env
 
 After clicking **Start**, the launcher shows an **Open Web UI** button once the server is up.
 
-- **Sidebar** — mode toggle (Studio / Director), model picker, prompt, LoRAs, advanced settings
-- **Main feed** — generated outputs, dashboard, Director pipeline status
+- **Top navigation** — switch between Director, Studio, and Editor without leaving the current project
+- **Studio sidecar** — workflow and model picker, prompt, references, LoRAs, and advanced settings
+- **Main workspace** — generated outputs, Director pipeline status, or the full Editor canvas and timeline
 - **Settings drawer** (gear icon) — model visibility, performance auto-tune, services (LLM, API keys, NSFW, theme)
 - **Pinokio menu** — Update, Reset, Install Inpaint Support, LoRA folder shortcuts
 
 ## Sharing on the local network
 
 Maestro respects Pinokio's `PINOKIO_SHARE_LOCAL` environment variable. Set it to `false` (in the per-app or global ENVIRONMENT file) to bind the server to loopback only; set to `true` for LAN access. Pinokio's own daemon proxy is a separate concern that may also need to honor the variable depending on your setup.
+
+## Private HTTPS and phone notifications
+
+For complete first-time setup and troubleshooting, see [Use Maestro Remotely with Tailscale](docs/TAILSCALE_REMOTE_ACCESS.md).
+
+Tailscale is optional. Its Personal plan is suitable for an individual connecting their own devices; every Maestro user signs into their own Tailscale account rather than joining a Maestro-owned network.
+
+1. Install Tailscale on the Maestro computer and phone, then sign both into the same account.
+2. Start Maestro. In the Pinokio menu choose **Secure Remote Access (Tailscale)**, or use **Settings → Notifications → Private HTTPS access** when the operating system permits non-elevated setup.
+3. Scan/copy the private `https://…ts.net` address shown in Maestro's Notifications settings.
+4. On iPhone/iPad, open that address in Safari, use **Share → Add to Home Screen**, open the installed Maestro app, and enable **System notifications**.
+
+The one-time Secure Remote Access action remembers Maestro's actual backend port and reuses it on future starts. On Windows it also registers a fixed, on-demand restore helper for that loopback target, so Maestro can repair the private route on later starts without another UAC prompt. Users who enabled an earlier v2 preview should run the action one final time after updating. `PINOKIO_SHARE_LOCAL_PORT` controls Pinokio's separate LAN proxy and does not need to be set for Tailscale. If the saved port is occupied and Maestro falls back to another one, run Secure Remote Access once to adopt the new port. Disable it from Notifications settings or run `tailscale serve --https=443 off`. Maestro will refuse to overwrite a different existing Serve route. Web Push signing keys and browser subscriptions live only in `app/settings/web_push.json` (a gitignored local file). Notification payloads travel directly from the local Maestro host to the browser vendor's encrypted Web Push endpoint.
+
+### Notification and remote-access API
+
+The same local endpoints used by the UI are available for automation. For example:
+
+```bash
+# Curl
+curl http://127.0.0.1:7860/api/v1/remote-access/tailscale/status
+curl http://127.0.0.1:7860/api/v1/notifications/push/status
+```
+
+```python
+# Python
+import requests
+
+status = requests.get(
+    "http://127.0.0.1:7860/api/v1/remote-access/tailscale/status",
+    timeout=10,
+).json()
+print(status.get("https_url"))
+```
+
+```javascript
+// JavaScript
+const status = await fetch('/api/v1/remote-access/tailscale/status').then(r => r.json())
+console.log(status.https_url)
+```
+
+Mutating endpoints are `POST /api/v1/remote-access/tailscale/enable`, `POST /api/v1/remote-access/tailscale/disable`, `POST|DELETE /api/v1/notifications/push/subscribe`, and `POST /api/v1/notifications/push/test`. A Push subscription contains browser-issued endpoint and encryption keys and should be treated as private local configuration.
 
 ## Credits
 
@@ -744,3 +920,36 @@ Third-party models, weights, and components keep their own licenses — review t
 ## Issues
 
 Bug reports and feature requests: [github.com/Blizaine/Maestro/issues](https://github.com/Blizaine/Maestro/issues).
+
+### Finding logs
+
+Open Maestro's project in Pinokio and use its **Logs** page to find the session
+where the problem occurred. Where available, **Get Help** can prepare a report
+from that session's logs.
+
+To find the files directly, open Maestro's top-level installation folder — the
+folder containing `start.js`, `install.js`, and the `app` and `ui` folders. The
+paths below are relative to that folder:
+
+| Problem | Log file |
+|---|---|
+| Startup, generation, or runtime errors | `logs/api/start.js/latest` |
+| Updating Maestro | `logs/api/update.js/latest` |
+| Installing Maestro | `logs/api/install.js/latest` |
+| Local LLM server loading or crashes | `logs/llm/llama-server.log` |
+
+`latest` is a **plain-text file without an extension**; open it with a text
+editor such as Notepad. Each launcher action has its own folder under
+`logs/api/`, created when that action runs. For an older run, select the relevant
+session in Pinokio or use a timestamped log in the same script folder. The local
+LLM log is refreshed each time its server starts, so save the failing output
+before retrying.
+
+If you launch Maestro outside Pinokio, include the output from the terminal
+where you started it; Pinokio's launcher log folders may not exist. If you still
+cannot find a log, explain how you launched Maestro and which log folders are
+present in your bug report.
+
+Include the last roughly 50 lines around the failure, plus your GPU, VRAM,
+operating system, mode, and model. Review the excerpt and redact personal
+information before sharing it.

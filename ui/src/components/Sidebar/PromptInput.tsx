@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useContext, useCallback } from 'react'
 import { Sparkles, Loader2, ChevronDown, ChevronUp, Brain, PenLine, RefreshCw } from 'lucide-react'
 import { useStore } from '../../stores/useStore'
 import {
@@ -6,31 +6,52 @@ import {
   h3OmniSequenceWindowCount,
   h3TimelineFrames,
 } from '../../lib/h3Memory'
+import {
+  continuationFirstWindowFrames,
+  durationWindowPlan,
+} from '../../lib/durationPlanning'
+import { ComposerContext, ComposerToolbarItem } from './SidebarPanels'
+import { SidebarMenu } from './SidebarMenu'
 
 const placeholders: Record<string, string> = {
   image: 'Describe your image...',
   video: 'Describe your video...',
   audio: 'Enter text to speak or describe audio...',
-  avatar: 'Describe your avatar animation...',
+  avatar: 'Describe the finished video...',
 }
 
-function useAutoGrowingTextarea(value: string) {
+/** Lightweight display-only estimate for reviewed AI window prompts. */
+function estimateH3TextTokens(value: string): number {
+  const lexical = value.match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*|[^\w\s]/g)?.length ?? 0
+  return Math.ceil(lexical * 1.25) + (value.trim() ? 8 : 0)
+}
+
+function useAutoGrowingTextarea(value: string, enabled = true) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const fitToContent = () => {
+  const fitToContent = useCallback(() => {
     const textarea = textareaRef.current
-    if (!textarea) return
+    if (!textarea || !enabled) return
+    textarea.style.overflowY = 'hidden'
     textarea.style.height = 'auto'
     // scrollHeight includes padding but not the two one-pixel borders used
     // by these border-box textareas. Include them so the final line is visible.
     textarea.style.height = `${textarea.scrollHeight + 2}px`
-  }
+  }, [enabled])
 
-  useLayoutEffect(fitToContent, [value])
+  useLayoutEffect(fitToContent, [value, fitToContent])
+  // The dock's hidden text mirror owns its height. Clear the expanded editor's
+  // measurements on return so the ordinary prompt follows that CSS layout.
+  useLayoutEffect(() => {
+    if (enabled) return
+    textareaRef.current?.style.removeProperty('height')
+    textareaRef.current?.style.removeProperty('overflow-y')
+  }, [enabled])
   useEffect(() => {
+    if (!enabled) return
     window.addEventListener('resize', fitToContent)
     return () => window.removeEventListener('resize', fitToContent)
-  }, [])
+  }, [enabled, fitToContent])
 
   return textareaRef
 }
@@ -69,12 +90,11 @@ function useEnhanceStatus(isEnhancing: boolean) {
   const [status, setStatus] = useState<{ phase: 'loading' | 'thinking' | 'writing' | 'idle'; chars: number }>({ phase: 'idle', chars: 0 })
 
   useEffect(() => {
-    if (!isEnhancing) {
-      setStatus({ phase: 'idle', chars: 0 })
-      return
-    }
-    setStatus({ phase: 'loading', chars: 0 })
+    if (!isEnhancing) return
     let active = true
+    queueMicrotask(() => {
+      if (active) setStatus({ phase: 'loading', chars: 0 })
+    })
     const poll = async () => {
       let streamStarted = false
       while (active) {
@@ -115,12 +135,14 @@ function useEnhanceStatus(isEnhancing: boolean) {
     return () => { active = false }
   }, [isEnhancing])
 
-  return status
+  return isEnhancing ? status : { phase: 'idle' as const, chars: 0 }
 }
 
 export function PromptInput() {
+  const composer = useContext(ComposerContext)
+  const compact = !!composer && !composer.expanded
   const prompt = useStore(s => s.params.prompt)
-  const promptTextareaRef = useAutoGrowingTextarea(prompt)
+  const promptTextareaRef = useAutoGrowingTextarea(prompt, !compact)
   const setParam = useStore(s => s.setParam)
   const generationMode = useStore(s => s.generationMode)
   const editSubMode = useStore(s => s.editSubMode)
@@ -135,14 +157,12 @@ export function PromptInput() {
   const resolution = useStore(s => s.params.resolution)
   const totalVramGb = useStore(s => s.systemStats?.gpu.vram_total_gb ?? 0)
   const imageMode = useStore(s => s.params.image_mode)
+  const studioVideoWorkflow = useStore(s => s.studioVideoWorkflow)
   const h3CameraCoverage = useStore(s => s.params.minimax_h3_camera_coverage || 'auto')
   const h3FirstLastMultiWindow = useStore(s => s.params.minimax_h3_multi_window === true)
-  const h3WindowPlanningEnabled = useStore(s => s.params.minimax_h3_window_storyboard !== false)
   const h3ReferenceSequenceEnabled = useStore(s => s.params.minimax_h3_reference_sequence === true)
-  const h3ManualSequencePrompts = useStore(s => s.params.minimax_h3_sequence_prompt_mode === 'manual')
   const h3NativeSequence = useStore(s => s.params.minimax_h3_sequence_continuity !== false)
   const ltxMultiWindow = useStore(s => s.params.ltx_multi_window === true)
-  const ltxManualWindowPrompts = useStore(s => s.params.ltx_window_prompt_mode === 'manual')
   const h3WindowPlan = useStore(s => s.h3WindowPlan)
   const updateH3WindowPrompt = useStore(s => s.updateH3WindowPrompt)
   const activeH3JobPhase = useStore(s => {
@@ -157,7 +177,9 @@ export function PromptInput() {
     && !!item.h3WindowPlan
   ))?.h3WindowPlan?.signature || '')
   const [ttsMenuOpen, setTtsMenuOpen] = useState(false)
-  const [windowPlanOpen, setWindowPlanOpen] = useState(false)
+  const [enhanceMenuOpen, setEnhanceMenuOpen] = useState(false)
+  const [enhanceAnchor, setEnhanceAnchor] = useState<HTMLDivElement | null>(null)
+  const [closedWindowPlanSignature, setClosedWindowPlanSignature] = useState<string | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
   const isAudioOnly = modelOptions?.audio_only
@@ -181,8 +203,23 @@ export function PromptInput() {
   const discardFrames = swDefaults?.discard_last_frames ?? 0
   const overlapSec = slidingWindowOverlap / fps
   const discardSec = discardFrames / fps
-  const stride = slidingWindowSeconds - discardSec - overlapSec
   const supportsSlidingWindows = modelOptions?.sliding_window === true
+  const firstWindowSeconds = (
+    studioVideoWorkflow === 'extend'
+    && supportsSlidingWindows
+  )
+    ? continuationFirstWindowFrames(
+        Math.round(slidingWindowSeconds * fps),
+        slidingWindowOverlap,
+      ) / fps
+    : slidingWindowSeconds
+  const plannedDuration = durationWindowPlan(
+    durationSeconds,
+    slidingWindowSeconds,
+    overlapSec,
+    discardSec,
+    firstWindowSeconds,
+  )
   const isH3FirstLast = (
     String(modelOptions?.architecture || '').startsWith('minimax_h3')
     && modelOptions?.omni_reference !== true
@@ -191,15 +228,12 @@ export function PromptInput() {
   const windowCount = supportsSlidingWindows
     && (!isH3FirstLast || h3FirstLastMultiWindow)
     && (!isLtxSequence || ltxMultiWindow)
-    && stride > 0
-    && durationSeconds > slidingWindowSeconds
-    ? 1 + Math.ceil((durationSeconds - slidingWindowSeconds + discardSec) / stride)
+    ? plannedDuration.windowCount
     : 1
   const usesWindows = generationMode === 'video' && supportsSlidingWindows && windowCount > 1 && imageMode !== 2
   const usesH3WindowPlanner = (
     usesWindows
     && modelOptions?.sliding_window_auto_prompt_pacing === true
-    && h3WindowPlanningEnabled
   )
   const nativeMaximumFrames = modelOptions?.frames_maximum ?? null
   const sequenceClipFrames = nativeMaximumFrames != null
@@ -230,29 +264,28 @@ export function PromptInput() {
     && sequenceClipFrames != null
     && h3SequenceTotalFrames > sequenceClipFrames
   )
-  const usesH3ManualSequence = h3SequenceEnabled && h3ManualSequencePrompts
+  const usesH3ManualSequence = h3SequenceNeedsMultiplePasses && !h3WindowPlan
   const usesH3ManualFirstLast = (
     usesWindows
     && isH3FirstLast
     && h3FirstLastMultiWindow
-    && !h3WindowPlanningEnabled
+    && !h3WindowPlan
   )
   const usesH3ManualPrompts = usesH3ManualSequence || usesH3ManualFirstLast
   const usesLtxManualPrompts = (
     usesWindows
     && isLtxSequence
     && ltxMultiWindow
-    && ltxManualWindowPrompts
   )
   const usesManualWindowPrompts = usesH3ManualPrompts || usesLtxManualPrompts
-  const usesH3SequencePlanner = h3SequenceNeedsMultiplePasses && !h3ManualSequencePrompts
+  const usesH3SequencePlanner = h3SequenceNeedsMultiplePasses
   const sequenceClipCount = h3SequenceEnabled && sequenceClipFrames
     ? h3OmniSequenceWindowCount({
         totalFrames: h3SequenceTotalFrames,
         windowFrames: sequenceClipFrames,
         overlapFrames: slidingWindowOverlap,
         nativeContinuation: h3NativeSequence,
-      })
+    })
     : 1
   const manualPromptLineCount = prompt.split('\n').filter(line => line.trim()).length
   const manualPromptCount = (usesH3ManualFirstLast || usesLtxManualPrompts)
@@ -292,6 +325,12 @@ export function PromptInput() {
     ? 'Describe the finished video and replacement characters...'
     : generationMode === 'avatar' && editSubMode === 'restyle'
       ? 'Describe the finished video...'
+      : generationMode === 'avatar' && editSubMode === 'outpaint'
+        ? 'Describe the expanded scene...'
+        : generationMode === 'avatar' && editSubMode === 'retake'
+          ? 'Describe the replacement performance...'
+          : generationMode === 'avatar' && editSubMode === 'edit_anything'
+            ? 'Describe the change you want...'
       : (placeholders[generationMode] || 'Describe your content...')
 
   // Close TTS menu on outside click
@@ -304,20 +343,19 @@ export function PromptInput() {
     return () => document.removeEventListener('mousedown', handler)
   }, [ttsMenuOpen])
 
-  // A server-created plan used to arrive collapsed, making the exact prompts
-  // effectively invisible once an expensive generation had started. Open a
-  // newly planned storyboard once; the user can still collapse it afterward.
-  useEffect(() => {
-    if (usesH3Plan && h3WindowPlan?.signature) {
-      setWindowPlanOpen(true)
-    }
-  }, [usesH3Plan, h3WindowPlan?.signature])
+  // A newly planned storyboard opens automatically. Store only the signature
+  // the user explicitly closed so a replacement plan opens without a state-
+  // synchronization effect or an extra render.
+  const windowPlanOpen = Boolean(
+    usesH3Plan
+    && h3WindowPlan?.signature
+    && closedWindowPlanSignature !== h3WindowPlan.signature
+  )
 
-  // Keep the prompt area at the bottom when the sidebar has spare room. The
-  // textarea itself grows to its complete content height, and the sidebar's
-  // outer scroller handles prompts taller than the viewport.
+  // The dock grows with its text; the expanded editor keeps the complete source
+  // and editable window plan without mounting a second prompt instance.
   return (
-    <div className="relative grow shrink-0 flex flex-col">
+    <div className="relative flex grow shrink-0 basis-auto flex-col">
       {/* Enhance status indicator */}
       {isEnhancing && enhanceStatus.phase !== 'idle' && (
         <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] text-text-muted bg-bg-tertiary/80 rounded-t-lg border border-b-0 border-border">
@@ -352,7 +390,9 @@ export function PromptInput() {
           <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-border bg-bg-tertiary/70">
             <button
               type="button"
-              onClick={() => setWindowPlanOpen(open => !open)}
+              onClick={() => compact ? composer?.expand() : setClosedWindowPlanSignature(current => (
+                current === h3WindowPlan?.signature ? null : (h3WindowPlan?.signature ?? null)
+              ))}
               className="flex-1 min-w-0 flex items-center gap-1.5 text-left"
               title="Review the complete Context-IR prompt assigned to each H3 continuation window."
             >
@@ -363,13 +403,17 @@ export function PromptInput() {
               {h3PlanIsStale && (
                 <span className="text-[9px] text-amber-400">Needs update</span>
               )}
-              {h3WindowPlan.planned_by === 'deterministic_fallback' && (
-                <span className="text-[9px] text-amber-400">Fallback</span>
+              {h3WindowPlan.planning_warnings?.length ? (
+                <span className="shrink-0 text-[9px] text-indicator-warning">Review needed</span>
+              ) : (h3WindowPlan.planned_by === 'deterministic_fallback' || h3WindowPlan.planned_by === 'hybrid_repair') && (
+                <span className="text-[9px] text-amber-400">
+                  {h3WindowPlan.planned_by === 'hybrid_repair' ? 'Repaired' : 'Fallback'}
+                </span>
               )}
             </button>
             <button
               type="button"
-              onClick={() => enhancePrompt()}
+              onClick={() => enhancePrompt(undefined, h3WindowPlan.planning_style === 'creative' ? 'creative' : 'faithful')}
               disabled={isEnhancing}
               title={`Rebuild the H3 ${usesH3SequencePlanner ? 'reference sequence' : 'window plan'} from the current idea and timing.`}
               className="p-1 text-text-muted hover:text-accent-blue disabled:opacity-50"
@@ -377,7 +421,46 @@ export function PromptInput() {
               <RefreshCw size={11} className={isEnhancing ? 'animate-spin' : ''} />
             </button>
           </div>
-          {windowPlanOpen && (
+          {!!h3WindowPlan.planning_warnings?.length && (
+            <div
+              role="alert"
+              className="mt-1.5 rounded-lg border border-indicator-warning/35 bg-indicator-warning/10 px-2.5 py-2 text-[10px] leading-relaxed text-text-secondary"
+            >
+              <div className="font-medium">Review this AI draft before generating</div>
+              {h3WindowPlan.planning_warnings.map((warning, index) => (
+                <div key={`${index}-${warning}`} className="mt-0.5">
+                  {warning}
+                </div>
+              ))}
+              {!!h3WindowPlan.planning_diagnostics?.length && (
+                <details className="mt-1 text-text-muted">
+                  <summary className="cursor-pointer select-none">Why repair was needed</summary>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {h3WindowPlan.planning_diagnostics.map((diagnostic, index) => (
+                      <li key={`${index}-${diagnostic}`}>{diagnostic}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <div className="mt-1 text-text-muted">
+                Open the exact window prompts to review or edit the script, or refresh to retry {h3WindowPlan.planning_style === 'creative' ? 'AI Creative' : 'AI Faithful'}.
+              </div>
+            </div>
+          )}
+          {!compact && !!h3WindowPlan.planning_notes?.length && (
+            <div
+              role="status"
+              className="mt-1.5 rounded-lg border border-border bg-bg-tertiary/70 px-2.5 py-2 text-[10px] leading-relaxed text-text-muted"
+            >
+              <div className="font-medium text-text-secondary">H3 timing note</div>
+              {h3WindowPlan.planning_notes.map((note, index) => (
+                <div key={`${index}-${note}`} className="mt-0.5">
+                  {note}
+                </div>
+              ))}
+            </div>
+          )}
+          {!compact && windowPlanOpen && (
             <div className="mt-2 space-y-3">
               {h3WindowPlan.windows.map((window, index) => (
                 <div
@@ -391,7 +474,10 @@ export function PromptInput() {
                       {usesH3SequencePlanner && !h3NativeSequence ? 'Clip' : 'Window'} {window.index}: {window.title || `Beat ${window.index}`}
                       {activeH3Window === window.index ? ' · Generating now' : ''}
                     </span>
-                    <span>{window.start_seconds.toFixed(1)}–{window.end_seconds.toFixed(1)}s</span>
+                    <span>
+                      {window.start_seconds.toFixed(1)}–{window.end_seconds.toFixed(1)}s
+                      {usesH3WindowPlanner && ` · ~${estimateH3TextTokens(window.prompt)} tokens`}
+                    </span>
                   </div>
                   <H3WindowPromptTextarea
                     value={window.prompt}
@@ -410,31 +496,34 @@ export function PromptInput() {
       )}
       {usesManualWindowPrompts && (
         <div className="mb-1.5 flex items-center justify-between gap-2 text-[10px] text-text-muted">
-          <span>One non-empty line per {manualPromptUnit}</span>
+          <span>One line per {manualPromptUnit}, or press Enhance</span>
           <span className={manualPromptLineCount === manualPromptCount ? 'text-text-secondary' : 'text-amber-400'}>
             {manualPromptLineCount}/{manualPromptCount} prompts
           </span>
         </div>
       )}
-      <div className="relative mt-auto">
+      <div className={compact ? 'studio-prompt-field relative min-h-[120px] grow shrink-0 basis-auto' : 'relative mt-auto'}>
+        {compact && (
+          <div data-prompt-mirror aria-hidden="true" className="studio-prompt-mirror invisible select-none whitespace-pre-wrap break-words border border-transparent px-3 py-2 text-base md:text-sm">{prompt + ' '}</div>
+        )}
         <textarea
           ref={promptTextareaRef}
+          aria-label="Generation prompt"
           rows={1}
           value={prompt}
           onChange={e => setParam('prompt', e.target.value)}
           placeholder={usesManualWindowPrompts
             ? `Line 1 = ${manualPromptUnit} 1, line 2 = ${manualPromptUnit} 2... (${manualPromptCount} total)`
             : usesH3Plan
-            ? `Describe the complete video idea—Maestro will plan ${expectedPlanCount} H3 ${usesH3SequencePlanner ? 'reference clips' : 'windows'}.`
+            ? `Describe your complete video, then press Enhance to plan ${expectedPlanCount} H3 ${usesH3SequencePlanner ? 'reference clips' : 'windows'}.`
             : usesWindows
               ? (isLtxSequence
-                  ? `Describe the complete video idea - Maestro will plan ${windowCount} LTX windows.`
+                  ? `Describe your complete video, then press Enhance to plan ${windowCount} LTX windows.`
                   : `Line 1 = window 1, line 2 = window 2... (${windowCount} windows)`)
             : modePlaceholder}
-          className="block w-full min-h-[112px] resize-none overflow-hidden bg-bg-tertiary border border-border rounded-lg px-3 py-2 pr-10 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-blue transition-colors"
+          className={`studio-prompt-textarea block w-full resize-none px-3 py-2 text-base md:text-sm text-text-primary placeholder:text-text-muted focus:outline-none transition-colors ${compact ? 'min-h-[72px] bg-transparent border border-transparent rounded-lg focus:border-border-light' : `${composer?.expanded ? 'min-h-[260px]' : 'min-h-[104px]'} bg-bg-tertiary border border-border rounded-xl focus:border-accent-blue`}`}
         />
-        {prompt.trim() && !usesManualWindowPrompts && (
-        isAudioOnly ? (
+        <ComposerToolbarItem>{isAudioOnly ? (
           /* TTS: mode-aware split button. Main button uses default mode based
              on voice-slot count; dropdown exposes both Speech and Dialogue
              explicitly so the user can override regardless of voice count.
@@ -443,11 +532,11 @@ export function PromptInput() {
              slots — bad UX trap especially with audio_mode_from_voice_count
              models like Scenema where the user may want a generated-voice
              dialogue script as a starting point. */
-          <div ref={menuRef} className="absolute right-2 bottom-2">
+          <div ref={menuRef} className={composer ? 'relative' : 'absolute right-2 bottom-2'}>
             <div className="flex items-center">
               <button
                 onClick={() => enhancePrompt(defaultMode)}
-                disabled={isEnhancing}
+                disabled={isEnhancing || !prompt.trim()}
                 title={isMultiVoice
                   ? `Write ${voiceCount}-person dialogue (use dropdown to switch to speech)`
                   : 'Write a speech (use dropdown to switch to dialogue)'}
@@ -457,14 +546,16 @@ export function PromptInput() {
               </button>
               <button
                 onClick={() => setTtsMenuOpen(!ttsMenuOpen)}
-                disabled={isEnhancing}
+                disabled={isEnhancing || !prompt.trim()}
+                aria-label="Speech enhancement options"
+                aria-expanded={ttsMenuOpen}
                 className="p-1.5 rounded-r-md text-text-muted hover:text-accent-blue hover:bg-bg-hover transition-colors disabled:opacity-50 border-l border-border"
               >
                 <ChevronUp size={10} />
               </button>
             </div>
             {ttsMenuOpen && (
-              <div className="absolute bottom-full right-0 mb-1 bg-bg-secondary border border-border rounded-lg shadow-lg overflow-hidden min-w-[220px] z-50">
+              <div className="absolute bottom-full mb-1 right-0 bg-bg-secondary border border-border rounded-lg shadow-lg overflow-hidden min-w-[220px] z-50">
                 <button
                   onClick={() => { setTtsMenuOpen(false); enhancePrompt('monologue') }}
                   className="w-full text-left px-3 py-2 text-[11px] text-text-secondary hover:bg-bg-hover transition-colors"
@@ -501,20 +592,24 @@ export function PromptInput() {
             )}
           </div>
         ) : (
-          <button
-            onClick={() => enhancePrompt()}
-            disabled={isEnhancing}
-            title="Enhance prompt with AI"
-            className="absolute right-2 bottom-2 p-1.5 rounded-md text-text-muted hover:text-accent-blue hover:bg-bg-hover transition-colors disabled:opacity-50"
-          >
-            {isEnhancing ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Sparkles size={14} />
-            )}
-          </button>
-        )
-        )}
+          <div ref={setEnhanceAnchor} className={`${composer ? 'relative' : 'absolute right-2 bottom-2'} flex items-center`}>
+            <button type="button" onClick={() => enhancePrompt(undefined, 'faithful')}
+              disabled={isEnhancing || !prompt.trim()} aria-label="Enhance prompt with AI Faithful" title="AI Faithful — enhance your prompt while preserving your events and dialogue"
+              className="min-h-8 rounded-l-md p-2 text-text-muted hover:text-accent-blue hover:bg-bg-hover disabled:opacity-40">
+              {isEnhancing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            </button>
+            <button type="button" onClick={() => setEnhanceMenuOpen(value => !value)} disabled={isEnhancing || !prompt.trim()}
+              aria-label="Prompt enhancement options" aria-haspopup="menu" aria-expanded={enhanceMenuOpen}
+              className="min-h-8 rounded-r-md border-l border-border px-1.5 text-text-muted hover:text-accent-blue hover:bg-bg-hover disabled:opacity-40"><ChevronUp size={12}/></button>
+            <SidebarMenu open={enhanceMenuOpen} anchor={enhanceAnchor} label="Enhance prompt" onClose={() => setEnhanceMenuOpen(false)} width={184}>
+              {(['faithful', 'creative'] as const).map(style => <button key={style} type="button" role="menuitem"
+                onClick={() => { setEnhanceMenuOpen(false); void enhancePrompt(undefined, style) }}
+                className="flex min-h-11 w-full items-center rounded-lg px-3 text-left text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary">
+                {style === 'faithful' ? 'AI Faithful' : 'AI Creative'}
+              </button>)}
+            </SidebarMenu>
+          </div>
+        )}</ComposerToolbarItem>
       </div>
     </div>
   )

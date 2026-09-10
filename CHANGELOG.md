@@ -3,7 +3,295 @@
 All notable changes to Maestro are documented here. The upstream WanGP
 pipeline's own history lives in [app/docs/CHANGELOG.md](app/docs/CHANGELOG.md).
 
-## [Unreleased]
+## [2.1.1] - 2026-09-08
+
+- Fixed underwritten H3 AI Creative conversations: each inadequate window gets
+  an independent dialogue repair and a feedback retry, preserving successful
+  repairs elsewhere. Explicit discussion lists are checked against spoken
+  lines, including requested details, rather than visual descriptions alone.
+- Corrected pronouns being counted as characters and matched unambiguous
+  RefMod filenames to their natural character names throughout planning and
+  Subject/voice compilation. Distinct RefMod versions remain separate.
+- Made H3 plan warnings visible in the normal Studio prompt area, including
+  mobile. Refresh preserves AI Creative/Faithful instead of reverting to Faithful.
+- Corrected bug-report and contributor log paths to include the launcher script
+  folder, and added a README guide to finding logs, older sessions, and terminal
+  output when no log file exists (#118).
+
+See the [v2.1.1 release notes](docs/RELEASE_NOTES_V2.1.1.md) for details.
+
+## [2.1.0] - 2026-09-08
+
+- Rebuilt Studio around compact reference inputs and a large prompt workspace.
+  Resolution, Aspect, Duration and Advanced use compact controls; Recipes is
+  grouped beside Resolution, Model Browser opens directly, and Generate retains
+  its separate queue action. All themes and model-specific choices remain.
+- Made prompt enhancement explicit: the magic button runs AI Faithful, with
+  Creative in its menu. Results are editable before submission. Added image
+  Faithful/Creative instructions and preserved reviewed H3/LTX window prompts.
+- Improved AI Creative dialogue for conversations, tutorials and character
+  interactions. Writing targets follow each window's duration at the shared
+  2.8 words/second pace, with a 3 words/second maximum across all speakers.
+  Sparse drafts get a focused writing retry; H3 supports up to six turns per
+  window. Exact lines, brief-dialogue requests and explicit silence remain respected.
+- Connected H3 multi-window Faithful/Creative planning to the same optional
+  shared content guide as Studio enhancement. It loads only with Mature mode
+  enabled, including chapter planning, per-window writing and retries.
+- Added model-aligned Time sliders through five minutes, retained long presets,
+  and displayed Auto's recommended duration. Fixed unstable prompt resizing,
+  iPhone keyboard/scroll handling, overlapping controls and moving duration sliders.
+- Combined Studio's media tabs, workflow selector, inputs and prompt into one
+  scrolling area. Long prompts grow with their text; settings and Generate stay
+  pinned, including in short windows. Typing keeps the active line visible.
+- Refined clip popups with content-sized Resolution/Aspect lists and a compact
+  Duration panel above its indicator. Auto stays visible in both tabs; dimmed
+  Time controls switch to manual on interaction. Time uses a five-minute
+  slider with 10m/15m/30m/60m/Custom presets. Window Length stays visible;
+  overlap is collapsible in both Time and Window modes.
+- Added active-count badges to Advanced section headings and anchored Advanced
+  above its mobile button. Fixed LoRA guides appearing off-screen; long guides
+  scroll and can be dismissed without closing their parent settings.
+- Matched Director's Target Duration to Studio's Auto toggle and Time/Window
+  controls. Restored H3 video LoRA strength sliders, repaired empty saved
+  weights, and retained independent Image and multi-phase Video strengths.
+- Simplified the mobile gallery header: centered Maestro branding/version,
+  sidecar menu on the left, queue/settings on the right. The mode selector
+  stays in the mobile sidecar instead of appearing in both headers.
+- Added portable `.maestro.safetensors` characters with saved voice and selected
+  PNG views, standard RefMod import, Hugging Face browsing, voice filters,
+  clearer names, cached video thumbnails and mobile scrolling. Improved native
+  image recovery and multi-character speaker matching. Saved characters now
+  work in supported Image/Animate workflows and across Speech models.
+- Added three-step Viggle Animate with control video and an edited frame from
+  any source time. Optional Flux 2 Klein preparation replaces the character
+  using a saved character/image and editable appearance instructions; preview,
+  manual Image-mode editing, Apply & return and settings restoration are supported.
+- Added H3 Voice Audio with one/two voice references, 45-second generations and
+  five-minute assembly, speaker turns, conservative Whisper trimming and sound
+  prompts. Shared dialogue pacing now defaults to 2.8 words/second with a maximum
+  admission rate of 3. Fixed production prose and mixed dialogue formats being
+  incorrectly counted as speech.
+- Added H3 VDN Full/Pruned and eight-step presets, H3 video/batch outpainting,
+  six-step audio-only refinement, and H3 Face Refiner for up to five tracked
+  faces with saved-character mapping and automatic or gallery processing.
+- Enabled experimental compatible character/style/concept LoRAs on H3 Fused
+  4-Step while excluding incompatible acceleration/VDN/DoRA adapters.
+- Added Media Flow batch finishing, RIFE 4.26 x3, optional DLSS 5 Neural Rendering
+  and native DLSS Frame Generation with hardware-aware availability. Native
+  DLSS has separate Windows 11/runtime requirements and remains unverified on
+  the Windows 10 development machine.
+- Fixed the H3 Extend model-switch React update loop and Director horizontal
+  overflow. Improved mobile Model Browser layout and added manual URL LoRA
+  destination selection with automatic suggestions. Expanded model, dialogue,
+  character, media and UI regression coverage and shared model offloading.
+- Fixed Windows ETA-history file handles remaining open and eager CUDA
+  initialization when importing the Wan/SCAIL model stack for CPU validation.
+
+See [complete v2.1.0 release notes](docs/RELEASE_NOTES_V2.1.0.md) for feature
+details, compatibility limits and update instructions.
+
+## [2.0.1] - 2026-09-04
+
+Startup and duration planning: fixed the post-v2.0 black-screen regression
+reported in GitHub issue #97. LTX Auto duration could synchronously feed its
+recommended duration back into native window sizing until React reached its
+maximum update depth. Single-window Auto plans now remain stable, while a real
+long-form request moves directly to the model's safe long-window ceiling.
+Frames and References still retain their efficient multi-window behavior.
+
+Video Extend: duration, window-count, prompt-count, and runtime routing now use
+one continuation-aware calculation. The source-tail overlap is treated as
+context instead of new footage, so selecting one window produces one extension
+rather than a full pass plus a tiny accidental second pass. The UI reports the
+fresh footage contributed by the first pass and the stride of later passes.
+The gallery's **Extend this video** action now opens the named Studio Extend
+workflow and reliably populates its source-video tile instead of uploading the
+clip behind a still-visible Frames panel.
+
+H3 prompt integrity: AI Faithful extension no longer mistakes instructional
+text containing a bare opening dialogue marker for one enormous spoken line.
+Nested/malformed dialogue tags are bounded safely, Context-IR field names are
+never inferred as speakers, and the actual user-authored source prompt—not a
+previous enhanced Context-IR document—is used if Auto duration later expands a
+single prompt into multiple windows.
+
+Load Settings is now a complete workflow round trip rather than a prompt-only
+shortcut. Studio restores Frames, References, Extend, Blend, Retake, Prompt
+Edit, Inpaint, Outpaint, Repaint, Recast, image workflows, Music, Speech, Sound
+Effects, Revoice, Mixer, Upscale, Film Grain, and their source assets and
+controls. Director revisions reopen in Director and Editor exports reopen the
+saved timeline project. Restoring one output also clears incompatible state
+from the previously open recipe instead of silently carrying it forward.
+
+Output metadata now retains the filenames and settings needed for those
+round trips, including multi-file references, voice slots, masks, anchors,
+blend controls, outpaint geometry, and post-processing parameters. Mixer
+outputs receive their own restorable sidecars and appear in the gallery as soon
+as they finish.
+
+Gallery details now show active generation time for ordinary single-window
+clips as well as multi-window sequences, excluding queue wait and model-load
+time when that timing basis is available. Original Prompt has its own Copy
+button alongside the generated/effective prompt.
+
+Background Web Push now loads Maestro's persisted VAPID PEM as an explicit
+signer instead of misreading the PEM text as raw DER. Completion, failure, and
+queue alerts use an Apple-compatible public-domain subject and can once again reach
+enrolled iPhone, iPad, and desktop devices; existing subscriptions remain
+valid.
+
+Release validation was expanded so the complete model/UI test suite runs in a
+portable CPU CI environment. CUDA capability probing now also returns a safe
+CPU sentinel instead of importing attention support through a nonexistent GPU.
+
+## [2.0.0] - 2026-09-03
+
+Editor: added a third top-level Maestro workspace beside Director and Studio.
+The new non-destructive editor supports layered video, audio, and title tracks;
+trim, split, duplicate, copy/paste, markers, undo/redo, snapping, track mute and
+lock, clip speed/volume/opacity, fades and dissolves, title fonts, and draggable
+canvas transforms. Projects save atomically per workspace and preserve export
+history. The responsive layout moves its media browser and inspector into a
+mobile-friendly panel without changing the desktop timeline. Export supports
+project and delivery resolutions, configurable frame rates, H.264/H.265/AV1,
+automatic hardware-encoder selection, audio mixing, and Maestro's universal
+held/running queue.
+
+Editor integration: media can be browsed across every Maestro workspace,
+uploads, and favorites. Complete Director outputs can be expanded into their
+individual generated shots on the timeline, with a Music Video's source song
+placed on its own audio layer. A selected clip can be sent to the appropriate
+Maestro Studio AI workflow and the finished result returns as a selectable take
+at the same timeline position. Clip overlap is prevented within one track,
+new visual layers stack in compositing order, removable tracks are supported,
+and the preview uses source-sized transform bounds, alignment guides, and a
+lightweight mobile playback path. Director productions now use their actual
+first generated frame in the Editor media browser, 21:9 is available as an
+Editor canvas, and iOS playback starts its media elements directly from the
+user gesture so preview no longer degrades into low-frame-rate playback.
+
+Studio navigation: replaced the crowded legacy mode bars with a compact
+hierarchical workflow selector. Video now groups Create/Frames/Extend/Blend,
+Retake/Edit Anything/Outpaint/Repaint/Recast, Upscale, and Finish without using
+the reserved top-level Editor name. Image adds explicit New, Edit, Upscale, and
+Outpaint workflows with model-aware inputs. Audio owns Music, Speech, Sound
+Effects, and Revoice. Film Grain is available as a reusable Finish workflow for
+any saved video, including Editor clips. The Director / Studio / Editor header,
+version label, app icon, and responsive behavior are now shared consistently.
+
+Long-form planning: Studio and Director now share one-window, Duration,
+Windows, and Auto planning rather than requiring a separate multi-window
+toggle. Duration presets cover 30 seconds through 60 minutes, exact timecodes
+remain editable, and window-count controls expose the frequently used 1/2/3/4
+pass cases directly. Presets are translated through the active model's real
+window, overlap, and discard geometry, so the UI reports both the actual
+runtime and pass count. Auto follows timed source media or explicit requested
+lengths and otherwise estimates a bounded story duration from visible beats
+and exact dialogue. Faithful and Creative AI planning let users either preserve
+their authored event ledger or ask the LLM to expand a concept with new action
+and dialogue. Long-form controls also cover compatible audio generation, while
+individual music-model limits remain enforced.
+
+Studio state now survives refreshes and restarts for the selected media mode,
+workflow, model, prompt-planning mode, H3 optimizations, and Characters/H3
+optimization disclosure panels. Video is explicitly separated into Frames for
+text, first/last, keyframe, control-video, and soundtrack-driven workflows, and
+References for H3 Omni identity/performance conditioning. Image Generate,
+Transform, and Finish similarly narrow their model choices from the media the
+user supplies.
+
+MiniMax H3: added the native 768p tier, 21:9 canvases, and the Regenerate 2K
+workflow. FL2VA and Ref2VA expose their corresponding Alibaba PAI eight-step
+acceleration presets, including native PDD parallel-head loading and sampling.
+Two optional experimental H3 Fused 4-Step entries bring Frames and References
+workflows to one shared, revision-pinned 21 GB INT8 ConvRot checkpoint with its
+Turbo, Mystic, and Ref2VA delta already baked in. The published four-evaluation
+recipe is the default, Advanced can test 4-8 total steps, and the integrated SLA
+sparse-attention path falls back safely to dense SDPA when its CUDA/Triton
+kernel is unavailable. These entries appear in the model lists but never
+replace a user's active model automatically.
+Reference conditioning no longer promotes an Omni identity reference into an
+implicit first frame. A new character library stores named image + voice pairs
+or video references, recalls them into Studio and Director Omni jobs, and
+automatically prepares reference videos within H3's per-clip and combined
+duration limits. Named Omni characters now receive immutable Subject/Speaker
+IDs with their own visual and voice media. Enhancement rejects placeholder,
+duplicate, or phantom subjects and repairs dialogue back onto its explicitly
+named speaker, preventing two-character voices and lines from being reversed.
+The same binding now runs at generation time for manual prompts as well as
+enhanced prompts: natural cues such as `Yoda says, "..."` are resolved against
+the saved-character manifest, incorrect structured `(S#)` tags are repaired,
+and ambiguous or phantom speakers stop with an actionable error instead of
+silently swapping identities or voices. Manually authored Context-IR can also
+place a `<d>...</d>` line after an adjacent, unambiguous named performance cue;
+the runtime follows that short discourse chain without reverting to quote-order
+guessing. Optional per-character background removal reduces identity-image
+scene leakage without forcing the processed look on every reference. Improved
+memory and reference preparation avoids needless high-resolution decoding
+while retaining full-quality identity conditioning.
+
+Long H3 Director casts now treat sequence-local `char_N` values as local slots
+rather than project-global identities. The final compiler rebinds those slots
+from each shot's actual visual identity, corrects evident screenplay-heading
+typos before dialogue lock, and repairs the same defect in resumable legacy
+plans. Synthetic dialogue-only duplicates are merged into the explicitly
+attributed visible actor. Ref2VA identity-image contracts also require exactly
+one physical instance unless the user requests clones, reject literal source-
+image cutaways/backgrounds/reflections, and let the target shot control
+wardrobe and lighting.
+
+H3 planning and Director: long-form plans now use a causal story architecture,
+character voice bibles, dialogue table reads, exact locked dialogue manifests,
+conversation-aware shot packing, concrete opening/closing state, and official
+MiniMax Context-IR conventions. Prompt enhancement uses structure-aware token
+estimates instead of a false 512-token rejection, preserves visible quoted text
+without treating it as speech, and compacts only prose that can be shortened
+without losing dialogue or timing. Faithful Studio planning keeps the user's
+event and dialogue schedule application-owned while the LLM supplies a bounded
+cinematic treatment, preventing previous enhanced prompts, duplicate entrances,
+or an uncertain model-authored schedule from replacing the source story.
+Director and Studio report per-clip,
+multi-window, and project ETAs with observed cache acceleration folded into
+later estimates. A private local SQLite timing history learns from completed
+runs with the same hardware, model, resolution, steps, LoRAs, and optimization
+profile, improving future estimates without storing prompts or media paths.
+
+Local LLMs: added Qwen3.8 27B Uncensored Q4_K_M with its vision projector,
+model-aware reasoning tiers, quantized KV planning for 24 GB systems, and
+separate thinking policies for creative work versus grammar-constrained
+structured output. Prompt enhancement can use bounded deep thinking and records
+reasoning/answer telemetry, while JSON and deterministic repair passes disable
+thinking. The llama.cpp compatibility floor was raised for Qwen3.8's corrected
+DeltaNet CUDA path without regressing v1.9.1's semantic-release to binary-
+nightly resolution and cached-runtime reuse.
+
+Notifications and remote access: added in-app completion alerts, optional
+browser and host chimes, event preferences, an installable PWA, and encrypted
+closed-app Web Push. Optional Tailscale Serve integration creates a private
+HTTPS address inside each user's own tailnet, displays a QR code, and remembers
+the selected Maestro backend port across restarts. Windows setup registers one
+fixed on-demand route-restoration task so later opted-in Maestro starts recover
+remote access without another UAC prompt. Dynamic ports remain the default for
+users who never opt in, Maestro never enables public Funnel access, and an
+existing unrelated Serve route is not overwritten.
+
+Gallery workflow: the active card now follows the media being viewed or played,
+and starting playback activates and unmutes that item. Expandable generation
+details show model, resolution, seed, LoRAs, H3 optimization chips, effective
+prompts, total scene duration, window count, per-window render times, and total
+generation time. Search indexes these generation parameters, making queries
+such as `Omni`, `Turbo`, `PDD`, or a LoRA name useful filters rather than merely
+filename searches.
+
+Launcher and polish: adopted the new orange Maestro icon, simplified Start and
+LoRA-folder actions, removed the normal Classic UI entry points, and kept the
+Pinokio launcher schema version independent from Maestro's application version.
+The release also includes H3 continuation diagnostics, reference manifest and
+Turbo update coverage, safer remote-access persistence, and expanded Editor,
+Studio image, film-grain, character-library, and PDD regression tests. Final
+hardening cleared the frontend lint backlog, fixed a hidden invalid image-hook
+call and incomplete Director v2 clip metadata, and repaired a shipped LongCat
+block-sparse attention indentation error found by the first-party compile pass.
 
 ## [1.9.1] - 2026-08-25
 

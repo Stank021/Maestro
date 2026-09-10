@@ -7,6 +7,8 @@
 # ships wheels built against the NumPy 2 ABI must be capped to match — see
 # opencv-python-headless and scipy below.
 timm>=1.0.17
+# SAM3 requires NumPy 1.x. OpenCV 4.12+ and SciPy 1.18+ require NumPy 2,
+# so keep all three packages on their newest mutually compatible release line.
 numpy>=1.26,<2
 tqdm
 ftfy==6.1.1
