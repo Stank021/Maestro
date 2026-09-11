@@ -466,9 +466,13 @@ MODEL_REGISTRY = {
         # ~115 GB genuinely free, adding --load-mode none should lift prefill
         # toward ~400 (measured on the abliterated build).
         # MTP: this variant SHIPS a draft model (Qwen3.8-Flash-Next-Uncensored-
-        # MTP-draft.gguf) — unlike the abliterated one. Speculative decoding via
-        # --model-draft is an untested future lever for gen speed; gen is already
-        # ~22, so not wired yet.
+        # MTP-draft.gguf). TESTED 2026-09-11 as speculative decoding via
+        # --spec-draft-model on llama-server b10809: the draft FAILS to load
+        # ("check_tensor_dims: tensor 'output_hc_norm.weight' not found") and
+        # the server then refuses to start at all. It is an MTP head, not a
+        # standalone draft model the generic speculative loader can read — same
+        # wall the abliterated build hit. Do NOT pass --spec-draft-model with
+        # this file; it takes the whole server down. Gen is already ~22 t/s.
         "cache_dir_override": "Qwen3.8-Flash-Next-Uncensored-orcarouter-Q4_K_S",
         "gguf_file": "Qwen3.8-Flash-Next-Uncensored-Q4_K_S-00001-of-00003.gguf",
         "mmproj_file": "mmproj-Qwen3.8-Flash-Next-Uncensored-F16.gguf",
