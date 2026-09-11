@@ -465,14 +465,20 @@ MODEL_REGISTRY = {
         # cold first prompt ~101 t/s prefill, warm ~283. If the box ever has
         # ~115 GB genuinely free, adding --load-mode none should lift prefill
         # toward ~400 (measured on the abliterated build).
-        # MTP: this variant SHIPS a draft model (Qwen3.8-Flash-Next-Uncensored-
-        # MTP-draft.gguf). TESTED 2026-09-11 as speculative decoding via
-        # --spec-draft-model on llama-server b10809: the draft FAILS to load
-        # ("check_tensor_dims: tensor 'output_hc_norm.weight' not found") and
-        # the server then refuses to start at all. It is an MTP head, not a
-        # standalone draft model the generic speculative loader can read — same
-        # wall the abliterated build hit. Do NOT pass --spec-draft-model with
-        # this file; it takes the whole server down. Gen is already ~22 t/s.
+        # MTP: this variant SHIPS a real MTP head as a draft file
+        # (Qwen3.8-Flash-Next-Uncensored-MTP-draft.gguf: arch qwen4exp,
+        # nextn_predict_layers 1, tensors blk.48.nextn.hc_head_*). It genuinely
+        # works in NATIVE engines (Unsloth/transformers, where MTP is intrinsic).
+        # TESTED 2026-09-11 in llama-server b10809 BOTH ways — plain
+        # --spec-draft-model AND --spec-type draft-mtp: both fail identically
+        # with "check_tensor_dims: tensor 'output_hc_norm.weight' not found" and
+        # the server exits. This build's MTP loader expects a different head
+        # tensor layout (output_hc_norm.*) than this packager produced
+        # (nextn.hc_head_*). So it is an ENGINE/FORMAT gap, not a broken model:
+        # MTP is unavailable in Maestro's llama.cpp until a build that reads this
+        # head layout. Do NOT pass a draft flag with this file — it downs the
+        # server. Gen without it is ~22 t/s. A newer llama.cpp build is the only
+        # lever; try it as a deliberate, separate step (Maestro pins the runtime).
         "cache_dir_override": "Qwen3.8-Flash-Next-Uncensored-orcarouter-Q4_K_S",
         "gguf_file": "Qwen3.8-Flash-Next-Uncensored-Q4_K_S-00001-of-00003.gguf",
         "mmproj_file": "mmproj-Qwen3.8-Flash-Next-Uncensored-F16.gguf",
