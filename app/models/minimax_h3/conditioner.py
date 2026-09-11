@@ -203,21 +203,11 @@ class MiniMaxH3Conditioner(nn.Module):
         return input_ids, attention_mask, None, encoded
 
     def _vision_inputs(self, prompt: str, images: list, device: torch.device):
-        # Cap the free-text budget here instead of at the processor call below.
-        # The processor expands each image into hundreds of <|image_pad|>
-        # tokens, so truncating the *combined* sequence severs the
-        # correspondence between the placeholders in the text and the ids, and
-        # transformers rejects it with "Mismatch in `image` token count between
-        # text and `input_ids`". At 704p the expansion fitted inside the old
-        # max_text_tokens + 4096 budget; at 1080p it needs ~6100 and every
-        # render died before the first step. Bound the prose, never the
-        # pictures. Prompts under the limit are passed through untouched so
-        # existing seeds keep reproducing.
-        text_ids = self.tokenizer(prompt, add_special_tokens=False)["input_ids"]
-        if len(text_ids) > self.max_text_tokens:
-            prompt = self.tokenizer.decode(
-                text_ids[: self.max_text_tokens], skip_special_tokens=False
-            )
+        # No truncation anywhere here, deliberately. Truncating the combined
+        # text+image sequence severs the <|image_pad|> placeholders from their
+        # ids ("Mismatch in `image` token count") and killed every 1080p render.
+        # Upstream v2.1.1 removed max_text_tokens and both truncations, which
+        # fixes that at the source; do not reintroduce a length cap.
         presentation = "".join(
             f"<Picture {index + 1}>: <|vision_start|><|image_pad|><|vision_end|>"
             for index in range(len(images))
@@ -235,7 +225,6 @@ class MiniMaxH3Conditioner(nn.Module):
                 images=images,
                 add_special_tokens=False,
                 padding=False,
-                truncation=False,
                 return_tensors="pt",
             )
         encoded = encoded.to(device)
