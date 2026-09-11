@@ -442,6 +442,52 @@ MODEL_REGISTRY = {
             "--load-mode", "none",
         ],
     },
+    "orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF": {
+        "label": "Qwen3.8 Flash Next Uncensored — OrcaRouter (Vision, MoE, experts in RAM)",
+        # Wired 2026-09-11 (Vera). Same qwen4exp arch as the abliterated Flash
+        # Next above (its imatrix even comes from that GGUF); this is the Q4_K_S
+        # OrcaRouter routing variant. Local files at
+        # C:\AI\LMM Models\Qwen3.8-Flash-Next-Uncensored-orcarouter-Q4_K_S,
+        # junctioned into ckpts/llm under cache_dir_override; the loader is
+        # local-first so nothing downloads. Split GGUF: name shard 1 of 3,
+        # llama.cpp picks up the rest. Pulled from Titan over the 2.5GbE wire,
+        # all shards SHA256-verified (see COPY-STATUS.txt in the folder).
+        # MEASURED 2026-09-11 on llama-server b10809, this exact flag set, WARM
+        # (3164-token prompt, 24 threads):
+        #   prefill 283 t/s, gen 22 t/s.  He'd seen "great gen ~23, bad prefill"
+        #   in Unsloth; --cpu-moe + -ub 2048 fixes prefill exactly as it did for
+        #   the abliterated build. Quality probe: clean valid planner JSON (exact
+        #   schema, no prose) and correct METAPHOR reading (not literal) — the
+        #   dense-model comprehension the Director needs.
+        # NO --load-mode none here (unlike the abliterated entry): the Q4_K_S
+        # shards total ~104 GB and Loki had ~104 GB free at test time, so forcing
+        # every expert resident risks a swap-thrash. mmap pages them on demand;
+        # cold first prompt ~101 t/s prefill, warm ~283. If the box ever has
+        # ~115 GB genuinely free, adding --load-mode none should lift prefill
+        # toward ~400 (measured on the abliterated build).
+        # MTP: this variant SHIPS a draft model (Qwen3.8-Flash-Next-Uncensored-
+        # MTP-draft.gguf) — unlike the abliterated one. Speculative decoding via
+        # --model-draft is an untested future lever for gen speed; gen is already
+        # ~22, so not wired yet.
+        "cache_dir_override": "Qwen3.8-Flash-Next-Uncensored-orcarouter-Q4_K_S",
+        "gguf_file": "Qwen3.8-Flash-Next-Uncensored-Q4_K_S-00001-of-00003.gguf",
+        "mmproj_file": "mmproj-Qwen3.8-Flash-Next-Uncensored-F16.gguf",
+        "disable_thinking": True,
+        "weights_gb": 104.0, "mmproj_gb": 0.9, "arch": "qwen4exp-flash-next",
+        "size_hint": "104 GB on disk · MoE, experts stream from system RAM (needs ~104 GB free RAM), ~10 GB VRAM",
+        "extra_flags": [
+            "-c", "32768",
+            "-ngl", "99",
+            "-np", "1",
+            "-t", "24",
+            "-fa", "on",
+            "--cache-type-k", "q8_0",
+            "--cache-type-v", "q8_0",
+            "--cpu-moe",
+            "-ub", "2048",
+            "-b", "4096",
+        ],
+    },
     "JonathanColetti/Qwen3.8-27B-Uncensored-GGUF": {
         "label": "Qwen3.8 27B Uncensored Q4_K_M (Vision, Deep Thinking)",
         # Q4_K_M is the repository author's recommended llama.cpp quant.
@@ -761,6 +807,7 @@ _PUBLIC_MODEL_ORDER = [
     # but selecting it would re-download ~16 GB, so it is not offered.
     "HauhauCS/Qwen3.8-27B-Uncensored-HauhauCS-Aggressive-MTP-GGUF",
     "huihui-ai/Qwen3.8-Flash-Next-abliterated-Huihui-GGUF",         # 2026-09-08: returns all 28 planner shots where the 27B returned 1
+    "orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF",                # 2026-09-11: OrcaRouter Q4_K_S, prefill 283 / gen 22 measured, clean planner JSON + metaphor
     "JonathanColetti/Qwen3.8-27B-Uncensored-GGUF",
     "Nesuwka/gemma-4-E2B-it-heretic-ara-Q4_K_M-GGUF",
     "Abhiray/gemma-4-E4B-it-heretic-GGUF",                         # default (Recommended)
