@@ -31,7 +31,7 @@ from .audio_vae import AutoencoderKLMiniMaxH3Audio
 from .checkpoint import (
     preprocess_audio_vae_state_dict,
     preprocess_conditioner_state_dict,
-    preprocess_video_vae_state_dict,
+    preprocess_native_video_vae_state_dict,
 )
 from .conditioner import MiniMaxH3Conditioner, MiniMaxH3Qwen3VL, build_h3_processor, load_h3_qwen_config
 from .convrot_layout import has_convrot_layout, restore_interleaved_h3_qkv
@@ -611,11 +611,15 @@ def _prepare_stereo_waveform(
     if sample_rate != MINIMAX_H3_AUDIO_SAMPLE_RATE:
         import torchaudio.functional as audio_functional
 
-        audio = audio_functional.resample(
-            audio,
-            sample_rate,
-            MINIMAX_H3_AUDIO_SAMPLE_RATE,
-        )
+        # MMGP sets the default device to CUDA. Torchaudio also creates
+        # scalar helpers without an explicit device, even for a CPU waveform.
+        # Keep those allocations on CPU until the audio encoder needs CUDA.
+        with torch.device("cpu"):
+            audio = audio_functional.resample(
+                audio,
+                sample_rate,
+                MINIMAX_H3_AUDIO_SAMPLE_RATE,
+            )
     audio = audio[..., :sample_count]
     if pad and audio.shape[-1] < sample_count:
         audio = F.pad(audio, (0, sample_count - audio.shape[-1]))
@@ -957,15 +961,17 @@ def _load_video_vae(filename: str) -> AutoencoderKLMiniMaxH3:
         vae = AutoencoderKLMiniMaxH3(
             latents_mean=VIDEO_LATENTS_MEAN,
             latents_std=VIDEO_LATENTS_STD,
+            native_checkpoint_layout=True,
         )
     offload.load_model_data(
         vae,
         filename,
         writable_tensors=False,
-        preprocess_sd=preprocess_video_vae_state_dict,
+        preprocess_sd=preprocess_native_video_vae_state_dict,
         default_dtype=torch.float16,
     )
     vae._model_dtype = torch.float16
+    print("[MiniMax H3 VAE] Native checkpoint layout; skipping decoder weight repacking in RAM.")
     return vae.eval().requires_grad_(False)
 
 
@@ -1139,7 +1145,7 @@ class MiniMaxH3Model:
                 "MiniMax H3 supports one Parallel Decoding Distillation "
                 "adapter at a time."
             )
-        for path in pdd_paths:
+        for path in turbo_paths:
             preset = minimax_h3_turbo_preset_for_path(path)
             if preset is None:
                 continue
@@ -1691,13 +1697,18 @@ class MiniMaxH3Model:
             <= FUSED_H3_MAX_EVALUATIONS
         ):
             raise ValueError(
-                "H3 Fused Turbo supports 4-8 total denoising steps; "
+                f"H3 Fused Turbo supports {FUSED_H3_MIN_EVALUATIONS}-{FUSED_H3_MAX_EVALUATIONS} total denoising steps; "
                 f"received {int(sampling_steps)}. Four is the published default."
             )
-        if self._turbo_lora_active and int(sampling_steps) < MINIMAX_H3_TURBO_MIN_STEPS:
+        turbo_minimum_steps = max((
+            int((minimax_h3_turbo_preset_for_path(path) or {}).get(
+                "minimum_steps", MINIMAX_H3_TURBO_MIN_STEPS
+            )) for path in self._turbo_lora_paths
+        ), default=MINIMAX_H3_TURBO_MIN_STEPS)
+        if self._turbo_lora_active and int(sampling_steps) < turbo_minimum_steps:
             raise ValueError(
                 "MiniMax H3 Turbo LoRA needs at least "
-                f"{MINIMAX_H3_TURBO_MIN_STEPS} denoising steps; "
+                f"{turbo_minimum_steps} denoising steps; "
                 f"received {int(sampling_steps)}."
             )
         if self._pdd_lora_active and int(sampling_steps) != PDD_NUM_EVALUATIONS:

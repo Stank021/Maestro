@@ -93,6 +93,8 @@ class AudioAnalysis:
     onset_envelope: List[float]
     lyrics: Optional[List[LyricSegment]] = None
     vocals_path: Optional[str] = None
+    percussion_activity: Optional[List[dict]] = None
+    music_cues: List[dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -221,12 +223,15 @@ def _classify_section(
 # ---------------------------------------------------------------------------
 
 _whisper_model = None
+_whisper_device = ""
 
 
-def _get_whisper_model():
-    global _whisper_model
-    if _whisper_model is not None:
+def _get_whisper_model(device: str = "cuda"):
+    global _whisper_model, _whisper_device
+    if _whisper_model is not None and _whisper_device == device:
         return _whisper_model
+    if _whisper_model is not None:
+        unload_whisper()
 
     try:
         from faster_whisper import WhisperModel
@@ -258,8 +263,11 @@ def _get_whisper_model():
     # Deliberately NOT fixed by installing nvidia-cublas-cu12: that puts a
     # second CUDA runtime on PATH next to a working CUDA 13 PyTorch build,
     # and a DLL-resolution-order accident there breaks generation itself.
+    # Upstream v2.2.x passes a device and caches it in _whisper_device; keep that
+    # contract while still falling back to CPU when the CUDA 13 build cannot encode.
     last_error = None
-    for device, compute_type in (("cuda", "float16"), ("cpu", "int8")):
+    attempts = (("cuda", "float16"), ("cpu", "int8")) if device == "cuda" else (("cpu", "int8"),)
+    for device, compute_type in attempts:
         try:
             print(f"[AudioAnalysis] Loading faster-whisper small model ({device.upper()})...")
             model = WhisperModel(
@@ -282,6 +290,7 @@ def _get_whisper_model():
                 print("[AudioAnalysis] GPU transcription unavailable; using CPU (slower but correct)")
             print("[AudioAnalysis] Whisper model loaded")
             _whisper_model = model
+            _whisper_device = device
             return _whisper_model
         except Exception as exc:
             last_error = exc
@@ -475,36 +484,50 @@ def _align_to_known_lyrics(
 
 
 def _transcribe(audio_path: str, lyrics_hint: Optional[str] = None) -> List[LyricSegment]:
-    model = _get_whisper_model()
     initial_prompt = _clean_lyrics_hint(lyrics_hint)
     if initial_prompt:
         print(f"[AudioAnalysis] Seeding transcription with known lyrics ({len(initial_prompt)} chars)")
-    segments, info = model.transcribe(
-        audio_path,
-        beam_size=5,
-        word_timestamps=False,
-        language=None,
-        vad_filter=True,
-        initial_prompt=initial_prompt,
-    )
-
-    lyrics = []
-    for seg in segments:
-        text = seg.text.strip()
-        if text:
-            lyrics.append(LyricSegment(
-                start=round(seg.start, 3),
-                end=round(seg.end, 3),
-                text=text,
-            ))
-    if lyrics_hint:
-        lyrics = _align_to_known_lyrics(lyrics, lyrics_hint)
-    return lyrics
+    for device in ("cuda", "cpu"):
+        try:
+            model = _get_whisper_model(device=device)
+            segments, info = model.transcribe(
+                audio_path,
+                beam_size=5,
+                word_timestamps=False,
+                language=None,
+                vad_filter=True,
+                initial_prompt=initial_prompt,
+            )
+            # faster-whisper initializes some CUDA dependencies lazily while
+            # iterating. Retry the whole transcription, not a partial segment list.
+            lyrics = []
+            for seg in segments:
+                text = seg.text.strip()
+                if text:
+                    lyrics.append(LyricSegment(
+                        start=round(seg.start, 3),
+                        end=round(seg.end, 3),
+                        text=text,
+                    ))
+            if lyrics_hint:
+                lyrics = _align_to_known_lyrics(lyrics, lyrics_hint)  # LOCAL
+            return lyrics
+        except (RuntimeError, OSError) as error:
+            message = str(error).lower()
+            missing_cuda_library = (
+                any(name in message for name in ("cublas", "cudnn", "cudart"))
+                and any(word in message for word in ("not found", "cannot be loaded", "cannot open shared", "could not load", "failed to load"))
+            )
+            if device != "cuda" or not missing_cuda_library:
+                raise
+            unload_whisper()
+            print(f"[AudioAnalysis] Whisper CUDA library unavailable; retrying transcription on CPU: {error}")
 
 
 def unload_whisper():
-    global _whisper_model
+    global _whisper_model, _whisper_device
     _whisper_model = None
+    _whisper_device = ""
     gc.collect()
 
 
@@ -943,6 +966,13 @@ def analyze(
         onset_envelope=onset_envelope,
     )
 
+    _set_progress("detecting_percussion", "Finding percussion entrances")
+    try:
+        from services.director.music_cues import detect_percussion
+        result.percussion_activity, result.music_cues = detect_percussion(y, sr)
+    except Exception as exc:
+        logger.warning("Percussion timing unavailable; continuing with beats and lyrics: %s", exc)
+
     if transcribe:
         try:
             transcription_path = audio_path
@@ -1149,6 +1179,7 @@ def plan_clip_structure(
     frames_steps: int = 4,
     frames_minimum: int = 5,
     total_duration: Optional[float] = None,
+    maximum_clip_seconds: Optional[float] = None,
 ) -> List[dict]:
     """Plan variable-duration clips aligned to beat positions.
 
@@ -1162,6 +1193,13 @@ def plan_clip_structure(
 
     Returns a list of clip dicts with ``beat_count`` and ``duration_frames``.
     """
+    if maximum_clip_seconds is not None:
+        from .director_music_timing import plan_capped_music_clips
+        return plan_capped_music_clips(
+            analysis, maximum_seconds=maximum_clip_seconds, fps=fps,
+            frames_steps=frames_steps, frames_minimum=frames_minimum,
+            total_duration=total_duration, energy_bias=energy_bias,
+        )
     bpm = analysis.get("bpm", 120.0)
     beat_duration = 60.0 / bpm
     beats = analysis.get("beats", [])

@@ -92,6 +92,7 @@ from shared.llm_engines.nanovllm.vllm_support import resolve_lm_decoder_engine
 from shared import model_dropdowns
 from collections import defaultdict
 from services.job_lifecycle import call_with_sticky_interrupt
+from services.generation_memory import classify_memory_error, cleanup_failed_generation, log_generation_memory, release_auxiliary_models
 
 # import torch._dynamo as dynamo
 # dynamo.config.recompile_limit = 2000   # default is 256
@@ -196,16 +197,29 @@ def clear_gen_cache():
 
 def release_model():
     global wan_model, offloadobj, reload_needed
+    reload_needed = True
     wan_model = None
     clear_gen_cache()
-    if "_cache" in offload.shared_state:
-        del offload.shared_state["_cache"]
-    if offloadobj is not None:
-        offloadobj.release()
-        offloadobj = None
-    offload.flush_torch_caches()
-    gc.collect()
-    reload_needed = True
+    previous_offload, offloadobj = offloadobj, None
+    try:
+        if previous_offload is not None:
+            previous_offload.release()
+    finally:
+        previous_offload = None
+        gc.collect()
+        offload.flush_torch_caches()
+
+
+def release_generation_memory():
+    """Run only after the failed generation has relinquished its tensors."""
+    try:
+        release_model()
+    finally:
+        release_auxiliary_models()
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
 def get_unique_id():
     global unique_id  
     with unique_id_lock:
@@ -2142,7 +2156,7 @@ def update_generation_status(html_content):
     if(html_content):
         return gr.update(value=html_content)
 
-family_handlers = ["models.wan.wan_handler", "models.wan.ovi_handler", "models.wan.df_handler", "models.hyvideo.hunyuan_handler", "models.ltx_video.ltxv_handler", "models.ltx2.ltx2_handler", "models.ltx25.ltx25_handler", "models.ltx2.scenema_audio_handler", "models.ltx2.ltx_audio_tts_handler", "models.minimax_h3.minimax_h3_handler", "models.longcat.longcat_handler", "models.flux.flux_handler", "models.qwen.qwen_handler", "models.kandinsky5.kandinsky_handler",  "models.z_image.z_image_handler", "models.krea2.krea2_handler", "models.hidream.hidream_handler", "models.TTS.ace_step_handler", "models.TTS.chatterbox_handler", "models.TTS.qwen3_handler", "models.TTS.yue_handler", "models.TTS.heartmula_handler", "models.TTS.kugelaudio_handler", "models.TTS.minimax_music3_handler", "models.TTS.index_tts2_handler"]
+family_handlers = ["models.wan.wan_handler", "models.wan.ovi_handler", "models.wan.df_handler", "models.hyvideo.hunyuan_handler", "models.ltx_video.ltxv_handler", "models.ltx2.ltx2_handler", "models.ltx25.ltx25_handler", "models.ltx2.scenema_audio_handler", "models.ltx2.ltx_audio_tts_handler", "models.minimax_h3.minimax_h3_handler", "models.longcat.longcat_handler", "models.flux.flux_handler", "models.qwen.qwen_handler", "models.kandinsky5.kandinsky_handler",  "models.z_image.z_image_handler", "models.krea2.krea2_handler", "models.hidream.hidream_handler", "models.TTS.ace_step_handler", "models.TTS.chatterbox_handler", "models.TTS.qwen3_handler", "models.TTS.yue_handler", "models.TTS.yue2.yue2_handler", "models.TTS.heartmula_handler", "models.TTS.kugelaudio_handler", "models.TTS.minimax_music3_handler", "models.TTS.index_tts2_handler"]
 DEFAULT_LORA_ROOT = "loras"
 
 def register_family_lora_args(parser, lora_root):
@@ -2696,15 +2710,10 @@ if not Path(config_load_filename).is_file():
     # this block only runs on first install.
     try:
         from services.hardware_detect import detect_hardware
-        from services.perf_recommend import recommend_settings, applied_keys
+        from services.perf_recommend import apply_auto_performance
         _hw = detect_hardware()
-        _rec = recommend_settings(_hw)
-        for _key in applied_keys():
-            if _key in _rec:
-                server_config[_key] = _rec[_key]
-        # Mark the config as auto-tuned so the UI shows the auto card
-        # by default. User can flip it off in Settings later.
-        server_config.setdefault("services", {})["auto_performance"] = True
+        _auto_result = apply_auto_performance(server_config, _hw, force=True)
+        _rec = _auto_result["recommended"]
         print(f"[Maestro] Auto-tuned for {_hw.get('gpu_name', 'CPU')}: {_rec.get('_recommendation_label', 'fallback profile')}")
     except Exception as _e:
         print(f"[Maestro] Auto-tune failed, using conservative defaults: {_e}")
@@ -3382,7 +3391,13 @@ def get_default_settings(model_type):
         with open(defaults_filename, "r", encoding="utf-8") as f:
             ui_defaults = json.load(f)
         fix_settings(model_type, ui_defaults)            
-    
+
+    if get_model_def(model_type).get("yue2_composition"):
+        # Refresh the old cached composition default for Studio and Director.
+        # Only defaults pass here; explicit modes in jobs or loaded outputs
+        # still go through validation unchanged.
+        ui_defaults["model_mode"] = 2
+
     default_seed = args.seed
     if default_seed > -1:
         ui_defaults["seed"] = default_seed
@@ -3413,9 +3428,9 @@ def load_model_definitions():
     """Discover model definitions from defaults/ + finetunes/ and (re)build the
     model registry. Safe to call again at runtime — e.g. after importing a new
     checkpoint/finetune — so a freshly added model appears without restarting:
-    existing entries are merged in place, newly-added files get initialized, and
+    existing entries are rebuilt in place, newly-added files get initialized, and
     displayed_model_types is rebuilt fresh."""
-    global models_def, model_types, displayed_model_types
+    global models_def, model_types, displayed_model_types, reload_needed
     models_def_paths =  glob.glob( os.path.join("defaults", "*.json") ) + glob.glob( os.path.join("finetunes", "*.json") )
     models_def_paths.sort()
     for file_path in models_def_paths:
@@ -3430,16 +3445,32 @@ def load_model_definitions():
         del json_def["model"]
         settings = json_def
         existing_model_def = models_def.get(model_type, None)
+        # Resolve family defaults against the newly imported architecture.
+        # Preserve references to the registry object, not stale architecture keys.
+        models_def[model_type] = model_def
+        try:
+            model_def = init_model_def(model_type, model_def)
+        except Exception:
+            if existing_model_def is not None:
+                models_def[model_type] = existing_model_def
+            else:
+                models_def.pop(model_type, None)
+            raise
+        model_def["settings"] = settings
         if existing_model_def is not None:
-            existing_settings = models_def.get("settings", None)
-            if existing_settings != None:
-                existing_settings.update(settings)
+            if (
+                model_type == globals().get("transformer_type")
+                and existing_model_def != model_def
+            ):
+                # The public ID may stay the same while its checkpoint or
+                # architecture changes. Rebuild the warm pipeline on the next
+                # generation, rather than mixing it with the new definition.
+                reload_needed = True
+            existing_model_def.clear()
             existing_model_def.update(model_def)
+            models_def[model_type] = existing_model_def
         else:
-            models_def[model_type] = model_def # partial def
-            model_def= init_model_def(model_type, model_def)
-            models_def[model_type] = model_def # replace with full def
-            model_def["settings"] = settings
+            models_def[model_type] = model_def
 
     model_types = models_def.keys()
     displayed_model_types= []
@@ -4223,21 +4254,30 @@ def init_pipe(pipe, kwargs, profile):
     preload =int(args.preload)
     if preload == 0:
         preload = server_config.get("preload_in_VRAM", 0)
+    # Per-job residency in MB. Unlike preload, this changes only the
+    # transformer; VAE, encoder and catch-all streaming limits stay intact.
+    transformer_budget = int(getattr(args, "transformer_budget", 0) or 0)
 
     kwargs["extraModelsToQuantize"]=  None
     source_budgets = kwargs.get("budgets", None)
     if source_budgets is None:  kwargs["budgets"] = source_budgets = {}
-    if profile in (2, 4, 5):
+    # Fractional profiles are variants of 3 and 4, with the same budgets.
+    # Skipping this normalization discarded their streaming limits entirely.
+    mmgp_profile = int(profile)
+    if mmgp_profile in (2, 4, 5):
         default_transformer_budget = default_transformer2_budget= kwargs.get("budgets", 100) 
         if isinstance(default_transformer_budget, dict):
             default_transformer_budget = default_transformer_budget.get("transformer", 100) 
             default_transformer2_budget = default_transformer2_budget.get("transformer2", 100) 
 
-        budgets = { "transformer" : default_transformer_budget if preload  == 0 else preload, "text_encoder" : 100 if preload  == 0 else preload, "*" : max(1000 if profile==5 else 3000 , preload) }
+        transformer_budget_mb = default_transformer_budget if preload == 0 else preload
+        if preload == 0 and transformer_budget > 0:
+            transformer_budget_mb = transformer_budget
+        budgets = { "transformer" : transformer_budget_mb, "text_encoder" : 100 if preload  == 0 else preload, "*" : max(1000 if profile==5 else 3000 , preload) }
         if "transformer2" in pipe:
             budgets["transformer2"] = default_transformer2_budget if preload  == 0 else preload
         source_budgets.update(budgets)
-    elif profile == 3:
+    elif mmgp_profile == 3:
         source_budgets.update({ "*" : "70%" })
 
     if "transformer2" in pipe:
@@ -4245,13 +4285,9 @@ def init_pipe(pipe, kwargs, profile):
             kwargs["pinnedMemory"] = ["transformer", "transformer2"]
     
     if profile == 4.5:
-        mmgp_profile = 4
         kwargs["asyncTransfers"] = False
     elif profile == 3.5:
-        mmgp_profile = 3
         kwargs["pinnedMemory"] = False
-    else:
-        mmgp_profile = profile
 
     return mmgp_profile
 
@@ -4527,10 +4563,14 @@ def load_models(model_type, override_profile = -1, output_type="video", **model_
     offloadobj = offload.profile(pipe, profile_no= mmgp_profile, compile = compile_modules, quantizeTransformer = False, loras = loras_transformer, perc_reserved_mem_max = perc_reserved_mem_max , vram_safety_coefficient = vram_safety_coefficient , convertWeightsFloatTo = transformer_dtype, **kwargs)  
     # Let the job-level memory planner tell whether a resident model was
     # profiled with enough activation headroom for a later, heavier request
-    # (notably H3 Ref2VA with a video reference).  A lower coefficient remains
-    # safe for lighter jobs and does not force an unnecessary reload.
+    # (notably H3 Ref2VA with a video reference). Record the requested budget
+    # too: a lighter H3 job can retain more weights instead of streaming them.
     try:
         wan_model._maestro_profile_vram_coefficient = float(vram_safety_coefficient)
+        wan_model._maestro_profile_transformer_budget_mb = kwargs["budgets"].get("transformer")
+        wan_model._maestro_profile_transformer_budget_override_mb = int(
+            getattr(args, "transformer_budget", 0) or 0
+        )
     except Exception:
         pass
     if len(args.gpu) > 0:
@@ -7355,6 +7395,7 @@ def _resolve_image_ref_fit(model_def, auto_aspect):
         return 1
     return ref_fit
 
+@cleanup_failed_generation(lambda: release_generation_memory())
 def generate_video(
     task,
     send_cmd,
@@ -8009,7 +8050,10 @@ def generate_video(
             and "subject_definitions:" in str(prompt)
             and "detailed_description:" in str(prompt)
         )
-        if multi_prompts_gen_type == 2 or _h3_omni_context_ir or model_def.get("minimax_h3_audio_only", False):
+        # Legacy prompt/image batching is expanded into individual tasks before
+        # this point. One still-image task has no subsequent video windows: all
+        # its description lines must condition the same output and references.
+        if image_mode in (1, 2) or multi_prompts_gen_type == 2 or _h3_omni_context_ir or model_def.get("minimax_h3_audio_only", False):
             prompts = [prompt]
             if _h3_omni_context_ir:
                 print(
@@ -9332,6 +9376,7 @@ def generate_video(
                         "scail2_recast_warmup_frames"
                     ] = recast_warmup_frames
                 overridden_inputs = None
+                artifact_metadata = None
                 samples = call_with_sticky_interrupt(
                     gen,
                     wan_model,
@@ -9502,6 +9547,9 @@ def generate_video(
                     abort = True
                     break
             except Exception as e:
+                crash_type = classify_memory_error(e)
+                if crash_type:
+                    log_generation_memory(torch.cuda)
                 if len(control_audio_tracks) > 0 or len(source_audio_tracks) > 0:
                     cleanup_temp_audio_files(control_audio_tracks + source_audio_tracks)
                 remove_temp_filenames(temp_filenames_list)
@@ -9525,12 +9573,6 @@ def generate_video(
                 gc.collect()
                 torch.cuda.empty_cache()
                 s = str(e)
-                keyword_list = {"CUDA out of memory" : "VRAM", "Tried to allocate":"VRAM", "CUDA error: out of memory": "RAM", "CUDA error: too many resources requested": "RAM"}
-                crash_type = ""
-                for keyword, tp  in keyword_list.items():
-                    if keyword in s:
-                        crash_type = tp 
-                        break
                 state["prompt"] = ""
                 if crash_type == "VRAM":
                     if (
@@ -9556,7 +9598,19 @@ def generate_video(
                             "number of frames."
                         )
                 elif crash_type == "RAM":
-                    new_error = "The generation of the video has encountered an error: it is likely that you have unsufficient RAM and / or Reserved RAM allocation should be reduced using 'perc_reserved_mem_max' or using a different Profile."
+                    new_error = (
+                        "Generation ran out of system RAM. Close other memory-heavy "
+                        "applications or reduce the model workload. If model weights "
+                        "are pinned, a lower reserved-RAM limit or an unpinned profile "
+                        "may help. Check the terminal for the original error."
+                    )
+                elif crash_type == "CUDA":
+                    new_error = (
+                        "CUDA reported an out-of-memory error. This driver message "
+                        "does not identify whether VRAM or host memory caused it. "
+                        "Check the terminal and RAM/VRAM usage, then try restarting "
+                        "Maestro or reducing the model workload."
+                    )
                 else:
                     new_error =  gr.Error(f"The generation of the video has encountered an error, please check your terminal for more information. '{s}'")
                 tb = traceback.format_exc().split('\n')[:-1] 
@@ -9584,6 +9638,7 @@ def generate_video(
                         audio_sampling_rate,
                     )
                     overridden_inputs = samples.get("overridden_inputs", None)
+                    artifact_metadata = samples.get("artifact_metadata")
                     if generated_audio is not None:
                         input_fills_window = (
                             input_waveform is not None
@@ -10024,6 +10079,11 @@ def generate_video(
                         "outputs": list(saved_artifacts),
                     },
                 )
+                if isinstance(artifact_metadata, dict):
+                    send_cmd("artifact_metadata", {
+                        "outputs": list(saved_artifacts),
+                        "metadata": artifact_metadata,
+                    })
 
                 inputs.pop("send_cmd")
                 inputs.pop("task")

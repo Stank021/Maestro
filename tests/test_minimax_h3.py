@@ -2064,10 +2064,9 @@ class TestMiniMaxH3Definition(unittest.TestCase):
         self.assertIn("Music / performance timeline", section)
         self.assertIn("Music / sound style only", section)
         self.assertIn("groupActiveReferences", section)
-        self.assertIn("Bound together as one H3 subject", section)
-        self.assertIn("Saved character audio is automatically bound as a Voice Reference", section)
+        # The compact inline editor replaced the old dialog's explanatory
+        # copy. Keep checking the voice binding rather than obsolete wording.
         self.assertIn("audio_intent: 'voice' as const", section)
-        self.assertIn("preserves the exact soundtrack and advances through it", section)
         self.assertIn("timeline_start_frame=window_start_frame_no", main)
         self.assertNotIn('accept="image/*,video/*,audio/*', section)
         self.assertNotIn('accept="audio/*', section)
@@ -2146,7 +2145,6 @@ class TestMiniMaxH3Definition(unittest.TestCase):
             handler.index("setDurationSeconds(audioDuration)"),
         )
         self.assertIn("onChange={event => setAudioIntent(", section)
-        self.assertIn("automatically enables a multi-window sequence", section)
         self.assertIn(
             "setDuration(useStore.getState().durationSeconds)",
             duration_slider,
@@ -2800,7 +2798,7 @@ class TestMiniMaxH3RuntimeSource(unittest.TestCase):
             full["preset_id"],
             "alibaba-pai-fl2va-pdd-8step",
         )
-        self.assertEqual(len(full["presets"]), 3)
+        self.assertIn("taomate-fl2va-3step-rank19", {preset["id"] for preset in full["presets"]})
         current_option = next(
             preset for preset in full["presets"]
             if preset["id"] == "alibaba-pai-fl2va-pdd-8step"
@@ -3262,6 +3260,26 @@ class TestMiniMaxH3RuntimeMath(unittest.TestCase):
         autocast.assert_not_called()
         visual.assert_called_once_with(pixels, grid_thw=grid)
         self.assertEqual(result, ("image embeds", []))
+
+    def test_audio_resampling_stays_on_cpu_with_a_non_cpu_default_device(self):
+        from models.minimax_h3.minimax_h3_main import _prepare_stereo_waveform
+
+        # MMGP changes the default device to CUDA. Use meta to expose implicit
+        # helper allocations without reserving VRAM or requiring a GPU.
+        waveform = self.torch.stack([
+            self.torch.linspace(-0.5, 0.5, 960, device="cpu"),
+            self.torch.linspace(0.75, -0.25, 960, device="cpu"),
+        ], dim=1)
+        for sample_rate in (44100, 48000):
+            with self.subTest(sample_rate=sample_rate):
+                expected = _prepare_stereo_waveform(waveform, sample_rate, 720)
+                with self.torch.device("meta"):
+                    actual = _prepare_stereo_waveform(waveform, sample_rate, 720)
+                    self.assertEqual(self.torch.empty(0).device.type, "meta")
+                self.assertEqual(actual.device.type, "cpu")
+                self.assertEqual(tuple(actual.shape), (2, 720))
+                self.assertTrue(self.torch.equal(actual, expected))
+                self.assertFalse(self.torch.equal(actual[0], actual[1]))
 
     def test_fl2va_overlap_splits_motion_history_and_boundary_frame(self):
         from models.minimax_h3.minimax_h3_main import (

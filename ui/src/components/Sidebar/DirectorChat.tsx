@@ -1,3 +1,5 @@
+import { DirectorMusicClipLength } from './DirectorMusicClipLength'
+import { DirectorGpuClipLimit } from './DirectorGpuClipLimit'
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Upload, Loader2, Music, RotateCcw, Check, X, ChevronRight, ChevronDown, ImageIcon, Play, Film, Mic, Sparkles, Send, Users, FileText, ListVideo } from 'lucide-react'
 import { useStore, directorModelUsesFixedMediaStrength, getFamiliesForMode, getModelsForFamily, resolveResolution } from '../../stores/useStore'
@@ -494,6 +496,20 @@ export function DirectorChat() {
   const reanalyzeWithLyrics = useStore(s => s.directorReanalyzeWithLyrics)
   const setKnownLyrics = useStore(s => s.setDirectorKnownLyrics)
   const setEnergyBias = useStore(s => s.directorSetEnergyBias)
+  const timelineSettingsKey = useStore(s => {
+    const model = s.selectedModelPerMode.video || 'ltx2_22B_distilled_1_1'
+    return `${model}|${s.directorVideoMaxShotFramesByModel[model] ?? 'auto'}|${s.directorResolution}|${s.directorAspectRatio}`
+  })
+  const previousTimelineSettings = useRef(timelineSettingsKey)
+  useEffect(() => {
+    if (previousTimelineSettings.current === timelineSettingsKey) return
+    previousTimelineSettings.current = timelineSettingsKey
+    const state = useStore.getState()
+    if (state.directorSkill === 'music_video' && state.directorAnalysis
+      && ['structure', 'style'].includes(state.directorStep)) {
+      void state.directorSetEnergyBias(state.directorEnergyBias)
+    }
+  }, [timelineSettingsKey])
   const confirmStructure = useStore(s => s.directorConfirmStructure)
   const setSceneDescription = useStore(s => s.directorSetSceneDescription)
   const setReferenceImage = useStore(s => s.directorSetReferenceImage)
@@ -1043,14 +1059,6 @@ export function DirectorChat() {
         )}
 
         {/* Analysis result — hidden for story path */}
-        {/* Model-specific generation options follow the media/reference inputs
-            and remain editable until prompt planning begins. */}
-        {directorPathReady && !isStoryPath && !directorSetupLocked && (
-          <SystemBubble>
-            <DirectorGenerationOptions />
-          </SystemBubble>
-        )}
-
         {!isStoryPath && analysis && pastStep('analyze') && (
           <SystemBubble>
             <AnalysisSummary
@@ -1096,6 +1104,7 @@ export function DirectorChat() {
                 beatDistribution={beatDistribution}
                 confirmStructure={confirmStructure}
                 isActive={atStep('structure')}
+                canAdjust={atStep('structure') || (!isShortFilm && atStep('style'))}
                 isShortFilm={isShortFilm}
               />
             </SystemBubble>
@@ -1149,9 +1158,6 @@ export function DirectorChat() {
                       </p>
                     </div>
                   </label>
-                  <div className="pt-1 border-t border-border/50">
-                    <DirectorGenerationOptions />
-                  </div>
                 </div>
               </SystemBubble>
             )}
@@ -1545,6 +1551,7 @@ function DirectorResolutionSelector({ disabled = false }: { disabled?: boolean }
 }
 
 function DirectorSetupPanel({ locked }: { locked: boolean }) {
+  const skill = useStore(s => s.directorSkill)
   const autoMode = useStore(s => s.directorAutoMode)
   const setAutoMode = useStore(s => s.setDirectorAutoMode)
   const seamless = useStore(s => s.directorSeamless)
@@ -1561,6 +1568,7 @@ function DirectorSetupPanel({ locked }: { locked: boolean }) {
     <div className="space-y-3">
       <DirectorAspectRatioSelector disabled={locked} />
       <DirectorResolutionSelector disabled={locked} />
+      {skill === "music_video" && <DirectorMusicClipLength disabled={locked} />}
 
       <div className="pt-2 border-t border-border/50 space-y-1.5">
         <span className="text-[10px] text-text-muted uppercase tracking-wider block">Workflow</span>
@@ -1604,6 +1612,9 @@ function DirectorSetupPanel({ locked }: { locked: boolean }) {
         <span className="text-[10px] text-text-muted uppercase tracking-wider block">Models</span>
         <DirectorModelSelection disabled={locked} />
       </div>
+
+      {/* Choose model-specific settings before uploading or analyzing media. */}
+      {!locked && <DirectorGenerationOptions />}
 
       {locked && (
         <p className="text-[9px] text-text-muted">
@@ -2158,7 +2169,7 @@ function AnalysisSummary({
 
 function StructureView({
   plannedClips, energyBias, localBias, setLocalBias, sliderRef, setEnergyBias,
-  loading, totalClipDuration, beatDistribution, confirmStructure, isActive, isShortFilm,
+  loading, totalClipDuration, beatDistribution, confirmStructure, isActive, isShortFilm, canAdjust,
 }: {
   plannedClips: ReturnType<typeof useStore.getState>['directorPlannedClips']
   energyBias: number
@@ -2172,16 +2183,17 @@ function StructureView({
   confirmStructure: () => void
   isActive: boolean
   isShortFilm?: boolean
+  canAdjust?: boolean
 }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-text-secondary">
         {isShortFilm
           ? 'Here are the scenes based on dialogue pacing. Adjust the scene pacing if needed.'
-          : 'Here\'s the clip structure based on the audio analysis. Adjust the cut speed if needed.'}
+          : 'Shots follow the audio analysis and the selected model’s duration limit. Longer song sections are divided into supported shots.'}
       </p>
 
-      {isActive && (
+      {canAdjust && (
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-[11px] text-text-muted uppercase tracking-wider">{isShortFilm ? 'Scene Pacing' : 'Cut Speed'}</label>
@@ -2194,6 +2206,7 @@ function StructureView({
             min={-2}
             max={2}
             step={1}
+            disabled={loading}
             value={localBias ?? energyBias}
             onChange={e => {
               const v = Number(e.target.value)
@@ -2239,9 +2252,7 @@ function StructureView({
               {plannedClips.map((clip, i) => {
                 const clipDur = clip.end - clip.start
                 const totalDur = plannedClips.reduce((s, c) => s + (c.end - c.start), 0)
-                const widthPct = isShortFilm
-                  ? Math.max((clipDur / totalDur) * 100, 1.5)
-                  : Math.max((clip.beat_count / plannedClips.reduce((s, c) => s + c.beat_count, 0)) * 100, 1.5)
+                const widthPct = Math.max((clipDur / Math.max(totalDur, 0.001)) * 100, 1.5)
                 const barColor = sectionBarColors[clip.section_label] || 'bg-gray-500'
                 const tooltipLabel = isShortFilm
                   ? `Scene ${i + 1}: ${clip.section_label} (${clipDur.toFixed(1)}s)`
@@ -2316,14 +2327,9 @@ function DirectorAdvancedAccordion() {
   const videoModel = useStore(s => s.selectedModelPerMode.video || 'ltx2_22B_distilled_1_1')
   const videoStepsByModel = useStore(s => s.directorVideoInferenceStepsByModel)
   const setVideoSteps = useStore(s => s.setDirectorVideoInferenceSteps)
-  const maxShotFramesByModel = useStore(s => s.directorVideoMaxShotFramesByModel)
-  const setMaxShotFrames = useStore(s => s.setDirectorVideoMaxShotFrames)
   const turboModeByModel = useStore(s => s.directorH3TurboModeByModel)
   const turboPresetByModel = useStore(s => s.directorH3TurboPresetByModel)
   const savedVideoLoras = useStore(s => s.savedLoraPerMode.video)
-  const directorResolution = useStore(s => s.directorResolution)
-  const directorAspectRatio = useStore(s => s.directorAspectRatio)
-  const totalVramGb = useStore(s => s.systemStats?.gpu.vram_total_gb ?? 0)
   const [directorVideoOptions, setDirectorVideoOptions] = useState<ModelOptions | null>(null)
   const shotImageSupport = useStore(s => s.models.find(
     model => model.model_type === videoModel,
@@ -2416,27 +2422,6 @@ function DirectorAdvancedAccordion() {
         ? defaultVideoSteps
         : clampVideoSteps(configuredVideoSteps))
   const videoStepsLocked = activeDirectorVideoOptions?.lock_inference_steps === true
-  const resolvedVideoResolution = resolveResolution(
-    activeDirectorVideoOptions,
-    directorResolution,
-    directorAspectRatio,
-  )
-  const windowRecommendation = recommendedWindowProfile(
-    activeDirectorVideoOptions?.director_memory_policy
-      || activeDirectorVideoOptions?.sliding_window_memory_policy,
-    resolvedVideoResolution,
-    totalVramGb,
-  )
-  const safeShotFrames = windowRecommendation?.frames ?? null
-  const manualMaxShotFrames = maxShotFramesByModel[videoModel] ?? null
-  const framesMinimum = activeDirectorVideoOptions?.frames_minimum ?? 1
-  const framesMaximum = activeDirectorVideoOptions?.frames_maximum ?? framesMinimum
-  const framesStep = activeDirectorVideoOptions?.frames_steps ?? 1
-  const nativeShotChoices = [124, 158, 175, 243, 345].filter(frames => (
-    frames >= framesMinimum
-    && frames <= framesMaximum
-    && (frames - framesMinimum) % Math.max(1, framesStep) === 0
-  ))
   const turboOption = activeDirectorVideoOptions?.minimax_h3_turbo
   const turboPresets = turboOption?.presets?.length
     ? turboOption.presets
@@ -2624,45 +2609,7 @@ function DirectorAdvancedAccordion() {
               </p>
             </div>
 
-            {(activeDirectorVideoOptions?.director_memory_policy
-              || activeDirectorVideoOptions?.sliding_window_memory_policy)
-              && nativeShotChoices.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <label className="text-[11px] text-text-secondary">Maximum planned shot</label>
-                  <select
-                    value={manualMaxShotFrames ?? ''}
-                    onChange={event => setMaxShotFrames(
-                      videoModel,
-                      event.target.value ? Number(event.target.value) : null,
-                    )}
-                    className="bg-bg-tertiary border border-border rounded px-1.5 py-0.5 text-[11px] text-text-primary focus:outline-none focus:border-accent-blue"
-                  >
-                    <option value="">Auto</option>
-                    {nativeShotChoices.map(frames => (
-                      <option key={frames} value={frames}>
-                        {formatSeconds(frames / (activeDirectorVideoOptions.fps || 24))}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <p className={`text-[10px] ${
-                  manualMaxShotFrames != null
-                  && safeShotFrames != null
-                  && manualMaxShotFrames > safeShotFrames
-                    ? 'text-amber-400'
-                    : 'text-text-muted'
-                }`}>
-                  {manualMaxShotFrames == null
-                    ? safeShotFrames != null
-                      ? `Auto plans at most ${formatSeconds(safeShotFrames / (activeDirectorVideoOptions.fps || 24))} per shot for ${resolvedVideoResolution} on ${totalVramGb.toFixed(0)} GB.`
-                      : `Auto derives the one-pass limit from the selected canvas and GPU.`
-                    : safeShotFrames != null && manualMaxShotFrames > safeShotFrames
-                      ? `Manual override exceeds Auto's ${formatSeconds(safeShotFrames / (activeDirectorVideoOptions.fps || 24))} recommendation and may run out of VRAM.`
-                      : `Manual native-shot limit. Director will plan dialogue and action to this duration.`}
-                </p>
-              </div>
-            )}
+            <DirectorGpuClipLimit model={videoModel} options={activeDirectorVideoOptions} />
 
             <div>
               <label className="text-[11px] text-text-secondary block mb-1">Upsampling</label>

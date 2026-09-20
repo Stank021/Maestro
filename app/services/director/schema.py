@@ -134,6 +134,8 @@ class SubjectRef:
     # through to the polish layer so it can substitute screenplay-
     # invented names with descriptors in narrative prose.
     speaker_name: Optional[str] = None
+    # Music-video performance in this shot, independent of camera focus.
+    performance_role: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = {"visual_description": self.visual_description}
@@ -145,6 +147,8 @@ class SubjectRef:
             d["wardrobe"] = self.wardrobe
         if self.speaker_name:
             d["speaker_name"] = self.speaker_name
+        if self.performance_role:
+            d["performance_role"] = self.performance_role
         return d
 
     @staticmethod
@@ -155,6 +159,7 @@ class SubjectRef:
             position_or_relation=d.get("position_or_relation"),
             wardrobe=d.get("wardrobe"),
             speaker_name=d.get("speaker_name"),
+            performance_role=d.get("performance_role"),
         )
 
 
@@ -234,6 +239,8 @@ class AudioPlan:
     vocal_style: Optional[str] = None
     timing_anchor: str = "balanced"  # "audio" | "video" | "balanced"
     lip_sync_critical: bool = False
+    # Analysis evidence, never an LLM-assigned performance or section label.
+    vocal_activity: Optional[str] = None
 
     def to_dict(self) -> dict:
         d = {"mode": self.mode, "timing_anchor": self.timing_anchor, "lip_sync_critical": self.lip_sync_critical}
@@ -243,6 +250,8 @@ class AudioPlan:
             d["effects"] = self.effects
         if self.vocal_style:
             d["vocal_style"] = self.vocal_style
+        if self.vocal_activity in {"active", "silent", "unknown"}:
+            d["vocal_activity"] = self.vocal_activity
         return d
 
     @staticmethod
@@ -254,6 +263,7 @@ class AudioPlan:
             vocal_style=d.get("vocal_style"),
             timing_anchor=d.get("timing_anchor", "balanced"),
             lip_sync_critical=d.get("lip_sync_critical", False),
+            vocal_activity=d.get("vocal_activity"),
         )
 
 
