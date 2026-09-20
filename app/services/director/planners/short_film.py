@@ -209,7 +209,9 @@ _H3_SCREENPLAY_MIN_CHARS = 50
 # screenplay response.  Ninety seconds keeps Qwen/Gemma creative calls small
 # while still giving each sequence room for several native video shots.
 _DIRECTOR_LONG_FORM_CHAPTER_SECONDS = 300
-_DIRECTOR_LONG_FORM_SEQUENCE_SECONDS = 90
+_DIRECTOR_LONG_FORM_SEQUENCE_SECONDS = int(
+    os.environ.get("MAESTRO_DIRECTOR_SEQUENCE_SECONDS", "90") or "90"
+)
 _DIRECTOR_LONG_FORM_PLAN_REVISION = 4
 
 _LONG_FORM_PLAN_TEXT_FIELDS = (

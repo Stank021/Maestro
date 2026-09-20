@@ -1001,6 +1001,24 @@ def _director_native_window_frames(
 
     latent_size = max(1, int(latent_size or 1))
     min_frames = max(1, int(min_frames or 1))
+
+    # Loki native-window cap. Director quantises CLIP lengths to this window
+    # during planning, and it also drives the render window — so LTX-2's
+    # 481-frame (~19 s @25fps) native window yields 20-40 s clips that spill
+    # this 16 GB card's VRAM (each window ~20 min) and chain into mush. When
+    # MAESTRO_LTX_WINDOW_SECONDS is set, shrink the native window to that many
+    # seconds: clips become short single windows that render under the spill
+    # cliff. Default unset => upstream native behaviour on other hardware.
+    # Optional Loki native-window cap, env-gated (default: upstream native).
+    _ltx_win_env = os.environ.get("MAESTRO_LTX_WINDOW_SECONDS")
+    if _ltx_win_env:
+        try:
+            _win_cap = round(float(_ltx_win_env) * fps)
+        except (TypeError, ValueError):
+            _win_cap = 0
+        if _win_cap > 0:
+            candidate = min(int(candidate), _win_cap)
+
     return max(
         ((max(1, int(candidate)) - 1) // latent_size) * latent_size + 1,
         min_frames,
@@ -7508,6 +7526,20 @@ def _run_video_generation(pid: str, params: dict, clip_plans: list[dict],
             sliding_window_frames = max_clip_frames + _latent + 1
         else:
             sliding_window_frames = native_window_frames
+
+        # Loki render-window cap. LTX-2's native window (481 frames ~19s @25fps)
+        # spills this 16 GB card's VRAM, so each window crawls (~20 min). When
+        # MAESTRO_LTX_WINDOW_SECONDS is set, cap the rolling window to that many
+        # seconds (quantized to the model's frame lattice) so each window stays
+        # under the spill cliff. Default unset => upstream native behaviour.
+        _ltx_win_env = os.environ.get("MAESTRO_LTX_WINDOW_SECONDS")
+        if _ltx_win_env and has_sliding_window:
+            try:
+                _capped_window = _quantize_frames(round(float(_ltx_win_env) * fps))
+            except (TypeError, ValueError):
+                _capped_window = 0
+            if _capped_window >= _min_f and _capped_window < sliding_window_frames:
+                sliding_window_frames = _capped_window
 
         for ci, cf in enumerate(per_clip_frames):
             wp_count = len((clip_plans[ci].get("window_prompts") or []) if ci < len(clip_plans) else [])

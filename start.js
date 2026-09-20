@@ -108,7 +108,21 @@ module.exports = async (kernel) => {
             // Director shot-length bound. Upstream hardcodes 26 s, validated on other
             // hardware; this box degrades past ~12 s. 12 gives ~11 s clips, ~20 of them
             // on a 3:21 song. See services/audio_analysis.py.
-            MAESTRO_MAX_CLIP_SECONDS: "12"
+            MAESTRO_MAX_CLIP_SECONDS: "12",
+            // Story-mode (no-audio) planner splits the film into planning sequences of
+            // this many seconds; upstream default 90 => a 2-min film became 4 fat 20-40 s
+            // clips, and a 40 s clip renders as 2 CHAINED rolling windows that drift to
+            // mush on this 16 GB card. 12 forces ~10 short single-shot beats, each <481
+            // frames so it renders as ONE window (holds identity, no chaining) and smaller
+            // than the 481 native window (faster, escapes VRAM spill).
+            // See services/director/planners/short_film.py.
+            MAESTRO_DIRECTOR_SEQUENCE_SECONDS: "12",
+            // Render-window cap. LTX-2's native window is 481 frames (~19 s @25fps),
+            // which spills this 16 GB card's VRAM and makes each window take ~20 min.
+            // 12 caps the rolling window to ~300 frames so it stays under the spill
+            // cliff (fast) and — paired with the 12 s clip length above — each clip is
+            // exactly ONE window (no chaining drift). See services/director_pipeline.py.
+            MAESTRO_LTX_WINDOW_SECONDS: "12"
           },
           path: "app",
           message: [

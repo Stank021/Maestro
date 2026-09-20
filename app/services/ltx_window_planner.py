@@ -233,7 +233,7 @@ def reinforce_ltx_window_invariants(
         joined = invariants[0]
     else:
         joined = ", ".join(invariants[:-1]) + f", and {invariants[-1]}"
-    prefix = f"Throughout this complete window, preserve {joined}."
+    prefix = f"Throughout this entire shot, preserve {joined}."
     return [
         item if item.startswith(prefix) else _collapse_prompt(f"{prefix} {item}")
         for item in cleaned
