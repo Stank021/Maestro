@@ -69,6 +69,17 @@ class family_handler:
                 {
                     "fps": 15,
                     "profiles_dir": ["longcat_video"],
+                    # LOCAL FIX: every other video family declares these
+                    # (wan_handler:213, kandinsky_handler:183,
+                    # minimax_h3_handler:1847). LongCat omitted them, so
+                    # test_class_i2v()/test_class_t2v() returned False, the API
+                    # reported is_i2v/is_t2v false, and the Studio selector
+                    # rejected the family outright in
+                    # modelSupportsStudioVideoMediaIntent() before any
+                    # Frames/References logic ran. LongCat Video does
+                    # text-to-video, image-to-video and video continuation.
+                    "t2v_class": True,
+                    "i2v_class": True,
                 }
             )
         elif base_model_type == "longcat_avatar":
@@ -80,7 +91,26 @@ class family_handler:
                     "audio_guide2_label": "Voice to follow #2",
                     "audio_guidance": True,
                     "any_audio_prompt": True,
-                    "audio_prompt_choices": True,                
+                    "audio_prompt_choices": True,
+                    # LOCAL FIX: every other handler that sets
+                    # audio_prompt_choices also declares audio_prompt_type_sources
+                    # (yue2_handler:121, qwen3_handler:287, index_tts2:90,
+                    # kugelaudio:85, ace_step:365). LongCat omitted it, so
+                    # launch.py's extract_choice() returned None, the Studio
+                    # InputsPanel found no choice containing "A", rendered no
+                    # soundtrack tile, and there was NO WAY to supply the audio
+                    # guide that longcat_main.py:745 hard-requires
+                    # ("Audio guide is required for LongCat Avatar").
+                    # The pipeline reads audio_guide directly and never looks at
+                    # audio_prompt_type, so the letter is purely the UI's handle.
+                    # No empty option: audio is mandatory for this model.
+                    "audio_prompt_type_sources": {
+                        "selection": ["A"],
+                        "labels": {"A": "Voice to follow"},
+                        "default": "A",
+                        "label": "Voice to follow",
+                        "letters_filter": "A",
+                    },
                     "image_ref_choices": {
                         "choices": [("None", ""), ("Anchor Reference Image", "KI")],
                         "letters_filter": "KI",
@@ -90,6 +120,11 @@ class family_handler:
                     "reference_image_enabled": True,
                     "no_background_removal": True,
                     "image_prompt_types_allowed": "TSVL",
+                    # LOCAL FIX: see longcat_video above. Avatar drives video
+                    # from an anchor reference image plus an audio guide, so it
+                    # is an i2v class model; it is not text-only, hence no
+                    # t2v_class.
+                    "i2v_class": True,
                 }
             )
 

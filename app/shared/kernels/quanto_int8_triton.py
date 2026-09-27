@@ -234,10 +234,10 @@ def _select_static_triton_int8_config(m: int, k: int, n: int) -> tuple[int, int,
         return _TRITON_MID_M_DEFAULT
     if m >= 256:
         cfg = _TRITON_LARGE_M_SHAPE_CONFIGS.get((k, n))
+        if cfg is None and n >= 2048:
+            cfg = (64, 256, 64, 8, 4)
         if cfg is not None:
             return cfg
-        if n >= 2048:
-            return (64, 256, 64, 8, 4)
     return _TRITON_LARGE_M_DEFAULT
 
 
@@ -884,6 +884,44 @@ def _autotune_config(
 
 
 def _select_triton_int8_config(
+    m: int,
+    k: int,
+    n: int,
+    *,
+    device: Optional[torch.device] = None,
+    kernel_kind: str = "fused",
+) -> tuple[int, int, int, int, int]:
+    """LOCAL FIX: clamp BLOCK_N>=256 configs to num_stages=3 on this hardware.
+
+    A 4-stage pipeline with BLOCK_N=256 needs **102400 bytes** of shared memory,
+    against sm_120's **101376** limit — short by exactly 1 KiB. Observed
+    identically across three completely different shapes:
+
+        m=64260 k=4096 n=12288  -> Required: 102400
+        m=28350 k=4096 n=4096   -> Required: 102400
+        m=512   k=4096 n=8192   -> Required: 102400
+
+    The requirement never varies, which confirms it is a function of the tile
+    and stage count only, not of m/k/n. So `(64, 256, 64, 8, 4)` can never
+    launch here — and it is both the `n >= 2048` default and the value of every
+    entry in _TRITON_LARGE_M_SHAPE_CONFIGS. Each failure silently drops Quanto
+    onto the non-injected path, which could not complete one denoising step in
+    six minutes.
+
+    Clamped in the wrapper rather than in the static selector because the inner
+    function can also return configs from the session cache, the on-disk
+    autotune cache, or the autotuner, all of which bypass the static table.
+    """
+    cfg = _select_triton_int8_config_uncapped(
+        m, k, n, device=device, kernel_kind=kernel_kind
+    )
+    block_m, block_n, block_k, num_warps, num_stages = cfg
+    if block_n >= 256 and num_stages > 3:
+        return (block_m, block_n, block_k, num_warps, 3)
+    return cfg
+
+
+def _select_triton_int8_config_uncapped(
     m: int,
     k: int,
     n: int,

@@ -848,7 +848,13 @@ const familyModeMap: Record<string, GenerationMode> = {
   ltx2: 'video',
   kandinsky5: 'video',
   tts: 'audio',
-  longcat: 'avatar',
+  // LOCAL FIX: upstream maps longcat -> 'avatar', but getFamiliesForMode()'s
+  // avatar branch hardcodes ['wan' | 'ltx2' | 'ltxv' | 'minimax_h3'] and never
+  // lists longcat — so the family was excluded from Video AND never shown in
+  // Video Transforms, i.e. unreachable in the UI despite being installed and
+  // returned by /api/v1/models. LongCat Avatar takes a reference image plus
+  // audio input and produces synced character video, which is what H3 does,
+  // and H3 lives in Video. So let it fall through to the 'video' default.
 }
 
 // Model types classified as Avatar even though their family is primarily Video
@@ -1107,7 +1113,8 @@ export function getFamilyMode(familyId: string): GenerationMode {
 /** Get the effective generation mode for a specific model (respects per-model overrides) */
 export function getModelMode(modelType: string, familyId: string): GenerationMode {
   if (avatarModelTypes.has(modelType)) return 'avatar'
-  if (familyId === 'longcat') return 'avatar'
+  // LOCAL FIX: see familyModeMap above — this override sent longcat to a mode
+  // whose family filter does not include it, hiding the family entirely.
   return getFamilyMode(familyId)
 }
 
