@@ -16,7 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 $taskName = "Maestro Tailscale Serve"
 $target = "http://127.0.0.1:$Port"
-$serveArguments = "serve --bg --yes --https=443 $target"
+$serveArguments = "serve --bg --yes --https=7443 $target"
 
 if (-not (Test-Path -LiteralPath $TailscalePath -PathType Leaf)) {
     throw "Tailscale executable was not found at '$TailscalePath'."
@@ -25,7 +25,7 @@ if (-not (Test-Path -LiteralPath $TailscalePath -PathType Leaf)) {
 # Configure the route immediately while this one-time setup process has the
 # user's explicit administrator approval. This also surfaces any Tailscale
 # HTTPS/tailnet consent failure before Maestro records setup as complete.
-& $TailscalePath serve --bg --yes --https=443 $target
+& $TailscalePath serve --bg --yes --https=7443 $target
 if ($LASTEXITCODE -ne 0) {
     throw "Tailscale Serve setup failed with exit code $LASTEXITCODE."
 }

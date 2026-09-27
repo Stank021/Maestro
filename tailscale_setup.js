@@ -31,7 +31,7 @@ module.exports = async (kernel) => {
       "serve",
       "--bg",
       "--yes",
-      "--https=443",
+      "--https=7443",
       "http://127.0.0.1:{{args.port}}",
     ],
   }
