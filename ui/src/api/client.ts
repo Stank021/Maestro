@@ -221,6 +221,7 @@ export async function planH3Windows(params: {
   overlap_frames: number
   discard_frames: number
   sliding_window_memory_override?: boolean
+  minimax_h3_extended_duration?: boolean
   has_start_image?: boolean
   has_end_image?: boolean
   image_paths?: string[]
@@ -313,6 +314,7 @@ export async function planH3Sequence(params: {
   references: MiniMaxH3Reference[]
   sequence_clip_frames?: number
   sequence_memory_override?: boolean
+  minimax_h3_extended_duration?: boolean
   overlap_frames?: number
   sequence_continuity?: boolean
   camera_coverage?: 'auto' | 'continuous' | 'multi_shot'
@@ -778,8 +780,16 @@ export async function fetchOutputMetadata(name: string, workspace?: string): Pro
 }
 
 export async function deleteOutput(name: string, workspace?: string): Promise<void> {
-  const res = await fetch(`${BASE}/api/v1/outputs/${encodeURIComponent(name)}${workspaceQuery(workspace)}`, { method: 'DELETE' })
-  if (!res.ok) throw new Error('Failed to delete output')
+  const isUpload = workspace === '__uploads__'
+  const endpoint = isUpload
+    ? `${BASE}/api/v1/uploads/${encodeURIComponent(name)}`
+    : `${BASE}/api/v1/outputs/${encodeURIComponent(name)}${workspaceQuery(workspace)}`
+  const res = await fetch(endpoint, { method: 'DELETE' })
+  if (!res.ok) {
+    const error = await res.json().catch(() => null) as { detail?: unknown } | null
+    const detail = typeof error?.detail === 'string' ? error.detail : null
+    throw new Error(detail || `Failed to delete ${isUpload ? 'upload' : 'output'}`)
+  }
 }
 
 export async function rejoinClips(groupId: string, audioFile?: string, workspace?: string): Promise<{ filename: string; clip_count: number }> {

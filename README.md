@@ -6,6 +6,11 @@ A one-click local AI **creative studio, director, and video editor** for creator
 
 ## What it does
 
+- **Qwen Image 2.1 7B:** unified image generation and editing with up to ten
+  references, dedicated prompt enhancement and transparent PNG output.
+  Research/evaluation license; commercial use requires a separate Qwen license.
+  [Usage and model details](docs/Qwen-Image-2.1.md).
+
 ### 🎬 Director Mode — automatic music videos and short films
 The flagship feature. Drop in an audio track or write a story; a local LLM plans every shot, writes screenplays/lyrics, generates start frames & keyframes with character consistency, polishes prompts per model & LoRA-specific prompting guides, and runs the full multi-clip generation. Two skills:
 
@@ -13,7 +18,7 @@ The flagship feature. Drop in an audio track or write a story; a local LLM plans
 - **Short Film** — screenplay-driven scenes with named characters, dialogue, and continuity across cuts. Pacing-bias slider controls cut frequency.
   
 - **Auto Mode** runs the entire pipeline end-to-end (analyze → plan → generate images → generate clips → combine). Manual mode lets you review and edit at every step.
-- **Director v2 architecture** separates screenplay writing, structured shot planning and model-specific formatting. Native H3 plans go directly through their H3 compiler; other paths use per-model polish where needed. Director shares Studio's adaptive writing and continuity guidance, protects exact dialogue and source-song vocals, and retains complete action/camera descriptions through final compilation.
+- **Director v2 architecture** separates screenplay writing, structured shot planning and model-specific formatting. Native H3 plans go directly through their H3 compiler; other paths use per-model polish where needed. Director shares Studio's adaptive writing and continuity guidance, with checks for source actions, exact dialogue and source-song vocals. Complex plans can still need review for continuity and completeness.
 
 ### ⚡ Performance Auto-Tune — zero-config setup
 Detects your GPU, VRAM, and RAM on first launch and picks the right profile, quantization, VAE tiling, and VRAM safety coefficient. No more "Profile 1 vs 2 vs 4.5" guesswork. Power users still have full manual control under "Show advanced settings."
@@ -27,8 +32,9 @@ Direct access to every model and every knob:
 - **Video** — create, extend, blend, retake, edit anything, outpaint, repaint, recast, upscale, and finish clips with MiniMax H3, LTX-2.5/2.3, SCAIL-2, Wan, Hunyuan, and many more.
 - **Image** — create, edit, upscale, or outpaint with Flux 2 Klein 9B, Krea 2 RAW/Turbo and Identity Edit, Qwen Image Edit, and more.
 - **Audio** — generate music with MiniMax-Music3, ACE-Step or **YuE2**, speech and cloned voices with H3 Voice Audio, Kugelaudio or Qwen3 TTS, sound effects with H3 or MMAudio, and revoice existing clips.
-- **YuE2 songs and personal styles:** 48 kHz stereo music with optional melody/chord planning, ABC scores and source-song covers. **My music (Experimental)** adds recording/caption/lyric review with local transcription drafts, resumable style-adapter training, automatic checkpoint auditions with a fixed test song, and portable adapter bundles. Training is optional; matching a specific singer's voice is not guaranteed. The exercised training GPU has 24 GB VRAM. YuE2 and the real-audio tokenizer weights have their own noncommercial model terms. [YuE2 music guide](docs/YuE2-music.md).
+- **YuE2 songs and personal styles:** 48 kHz stereo music with optional melody/chord planning, ABC scores and source-song covers. **My music (Experimental)** adds full-song transcription and voice-group review, resumable training, fixed auditions and portable styles. Choose AR song-style training or the author's tokenizer/decoder sound adaptation, with original/before/after listening comparisons. Check-only recordings help evaluate learning on another song. Training is optional; matching a specific singer's voice is not guaranteed. The exercised training GPU has 24 GB VRAM. YuE2 and the real-audio tokenizer weights have their own noncommercial model terms. [YuE2 music guide](docs/YuE2-music.md).
 - **Multi-clip generation** with per-clip prompts, seamless overlapping (sliding window) transitions, and shared LoRAs
+- **YuE2 Instrumental:** automatically applies a dedicated instrumental LoRA and melody/chord planning. The adapter downloads on first use; artist LoRAs pause while Instrumental is selected. [Instrumental guide](docs/YuE2-music.md#instrumental).
 - **Long-form planning up to 60 minutes** with one-window, friendly duration, exact timecode, window-count, and Auto controls; unified H3 Enhance develops short concepts and preserves detailed scripts across windows
 - **Blend video Mode** Remember Sora 1 blend mode, where you could overlap two videos, and use AI to blend them together? 
 - **Frames Injection (KFI)** for character continuity in long videos
@@ -45,7 +51,7 @@ Direct access to every model and every knob:
 - **Better character images:** recover native-resolution PNG views from RefMods, choose a cover, and download selected images individually or as a ZIP. Original photos/video frames are used when available; selected PNGs and the cover travel with shared Maestro characters.
 - **Characters in Image mode:** add saved characters and recovered RefMod views to models that accept image references. Choose specific views, keep source/reference order, and describe clothing or other appearance changes in the image prompt.
 - **H3 Face Refiner:** automatically refine up to five tracked faces after generation, or use **Refine faces** on a gallery video. Preview face thumbnails, map saved characters and RefMods, or skip individual faces. Saves a new copy with the original resolution and soundtrack. See [H3 Face Refiner](docs/H3-Face-Refiner.md).
-- **Media Flow** batches image/video finishing and video outpainting. RIFE 4.26 supports x2/x3/x4 frame rates. Optional **DLSS 5 Neural Rendering** and **DLSS Frame Generation** integrate with generation postprocessing and finishing tools on supported Windows 11/RTX systems. See the [DLSS installation guide](docs/DLSS5.md) and [port plan, validation and testing instructions](docs/development/wan2gp-12-71-port-plan.md).
+- **Media Flow** batches image/video finishing and video outpainting. RIFE 4.26 supports x2/x3/x4 frame rates. Optional **DLSS 5 Neural Rendering** and **DLSS Frame Generation** integrate with generation postprocessing and finishing tools on supported Windows 11/RTX systems. An opt-in **experimental Windows 10** backend adds 1x neural enhancement and 1.5x, 1.724x, 2x and 3x DLSS upscaling; Frame Generation still requires Windows 11. See the [DLSS installation guide](docs/DLSS5.md) and [port plan, validation and testing instructions](docs/development/wan2gp-12-71-port-plan.md).
 
 ### 🤖 Local LLM — built-in, no setup
 Maestro auto-downloads `llama-server` (~600 MB one-time) and your chosen GGUF model on first use. Defaults to **Gemma 4 4B (Recommended)** — fast, capable, and runs comfortably on smaller GPUs. Auto-detects CUDA and binds the LLM to GPU when available.
@@ -57,7 +63,7 @@ Maestro auto-downloads `llama-server` (~600 MB one-time) and your chosen GGUF mo
 
 ### 🗂️ Browse the whole library
 
-Choose **All folders** in the gallery folder picker to browse and search every output folder. Search includes original and enhanced prompts, and filters apply across the complete collection. Results load in pages and show their source folder. Browsing keeps your generation destination unchanged; identical filenames in different folders remain separate items. [Gallery controls](docs/Studio-controls.md#gallery-scope-and-search).
+Choose **All folders** in the gallery folder picker to browse and search every output folder. Search includes original and enhanced prompts, and filters apply across the complete collection. Results load in pages and show their source folder. Browsing keeps your generation destination unchanged; identical filenames in different folders remain separate items. Media cards show timestamps; **Info** includes file details and upscale method, scale and before/after resolution when available. **Uploads → More → Delete upload** removes an unused source with confirmation. [Gallery controls](docs/Studio-controls.md#gallery-scope-and-search).
 
 ### 🛒 Built-in CivitAI LoRA browser
 - Search, filter, and one-click install any LoRA from CivitAI without leaving Maestro
@@ -101,6 +107,58 @@ View all past Director runs with their full state — clip plans, generated imag
 
 The version you are running is shown next to the Maestro title in the UI. To update, use the launcher's Update button in Pinokio.
 
+### v2.4.1 (2026-09-25)
+
+**More Qwen Image 2.1 tools, experimental Windows 10 DLSS, and better gallery details**
+
+- **Qwen Image 2.1:** pose/depth/edge transfer, inpainting, LanPaint, outpainting, native **2K** presets, optional reference KV caching, and managed **Viggle Turbo** 4/5/6-step profiles. Updated prompt guidance, base settings and VAE tiling; fixed the inpainting-mode error on ordinary image generation.
+- **H3 and LTX performance:** automatic H3 INT8 ConvRot video VAE selection with INT8 transformers, plus optional Comfy Kitchen kernels on supported RTX 50 hardware with compatibility fallbacks.
+- **Windows 10 DLSS — Experimental:** optional 1x neural enhancement and 1.5x/1.724x/2x/3x upscaling for images and videos. Improved frame processing, audio preservation and worker cleanup. Requires a separate opt-in installation; DLSS Frame Generation remains Windows 11 only. [Setup guide](docs/DLSS5.md).
+- **Gallery ordering:** keep results in chronological order during generation, refresh and pagination, while retaining the selected item (#155).
+- **Media Info:** timestamps, measured resolution and file details, plus finishing method, scale, before/after resolution and frame rate, source and processing time when available.
+- **Upload cleanup:** delete uploaded media from the gallery with confirmation and protection for inputs used by active jobs.
+
+Use **Update** in Pinokio, restart Maestro and refresh the browser. Your existing projects, settings and media stay in place. Optional model assets download when first used; the Windows 10 DLSS backend requires explicit installation.
+
+[Full v2.4.1 release notes](docs/RELEASE_NOTES_V2.4.1.md) · [Validation and remaining limits](docs/VALIDATION_V2.4.1.md) · [Changelog](CHANGELOG.md)
+
+### v2.4.0 (2026-09-24)
+
+**Immersive gallery, Qwen LoRA improvements, H3 Singularity, and better prompt-enhancement control**
+
+- **Fullscreen gallery:** enlarge images and browse images/videos with vertical swipes, keyboard navigation and favorites. Tap to pause or play, keep your sound choice across clips, and pinch to zoom images. Prepared video transitions and cached first-frame posters improve mobile playback. Native fullscreen is used where the browser supports it.
+- **Before/after image comparison:** move a divider between the source and result. The active sidecar image is selected by default, or compare other gallery/local images.
+- **Gallery → active input:** send images, captured frames or whole videos to the visible Studio or Director inputs, including References, Frames, Animate, editing and upscaling.
+- **Qwen Image 2.1 improvements:** a dedicated CivitAI LoRA filter, compatible fused-layer LoRA imports, and lower memory pressure when encoding multiple references. Enabled compatible Qwen models now appear in Director's image selector.
+- **H3 Singularity — Experimental:** a separate v1.3 References model with the recommended LightX2V four-step Turbo preset, managed downloads, and Studio/Director support. [Testing guide](docs/H3-Singularity.md).
+- **More reliable H3 enhancement:** more precise source-action, dialogue, reference and continuity checks; focused camera-plan repairs; and music-driven prompts that leave vocals to the supplied audio. Complex scenes can still require review.
+- **Choose repair behavior:** Settings → Integrations lets you set **0–5 fidelity repair attempts** and optionally **Generate even if fidelity checks fail** for Enhance on generation. Default behavior remains one repair attempt and review when needed.
+- **Director music fixes:** performance instructions apply to the visible cast, avoiding unwanted musicians in narrative shots. Dialogue markup, speaker/language ownership and supplied-audio handling are improved.
+- **Reliability fixes:** Windows Face Refiner cleanup, Recast mask memory, API-key saving, remote LLM reference images, and bundled DramaBox guides.
+
+Use **Update** in Pinokio, restart Maestro and refresh the browser. Existing projects, models, LoRAs and outputs stay in place. Singularity downloads its optional assets when first used.
+
+[Full v2.4.0 release notes and issue coverage](docs/RELEASE_NOTES_V2.4.0.md) · [Validation and remaining limits](docs/VALIDATION_V2.4.0.md) · [Changelog](CHANGELOG.md)
+
+### v2.3.0 (2026-09-20)
+
+**Qwen Image 2.1, automatic music training, and a redesigned music LoRA library**
+
+- **Qwen Image 2.1 7B:** generate and edit with the same model, combine up to ten references, use dedicated prompt enhancement, and save transparent PNGs. Includes memory offloading, tiled VAE processing and a separate selector for compatible LoRAs. [Image guide](docs/Qwen-Image-2.1.md).
+- **My Music Auto training:** upload recordings, choose training targets and let Maestro prepare the dataset, train voice/sound, then train song style in one queued workflow. Defaults to 100 voice/sound steps and 200 song-style steps, with stop/resume and further training available.
+- **Easier Guided training:** a clear recordings → voice/sound → song style → test-song workflow. Technical settings and alternate methods live in Expert settings. Matched tokenizer/decoder adaptation, checkpoint auditions and source-audio reconstruction help compare progress.
+- **Automatic dataset preparation:** separate vocals, transcribe lyrics, detect voices and suggest clips from full songs. Guided mode lets you review speakers, words and boundaries; Auto uses suggested clips. Check-only songs stay out of training. New projects recommend v9 while existing projects keep their assets.
+- **Music LoRAs in Advanced:** searchable checkboxes, individual strengths, automatic training triggers and an active-count badge. Choose which saved LoRAs appear in the selector, remove/restore library entries, import combined AI-Toolkit adapters, and experiment with multiple compatible LoRAs.
+- **Better YuE2 instrumentals and songwriting:** Instrumental automatically uses the dedicated instrumental LoRA and composition recipe. Songwriting preserves the requested vocalist, vocal delivery and training trigger more clearly. [Music and training guide](docs/YuE2-music.md).
+- **Experimental H3 clips up to 30 seconds:** opt in from Studio's Duration settings for Frames and References, including queued enhancement. Auto retains its normal GPU recommendations; Animate keeps its existing window length.
+- **No replayed job notifications:** opening Maestro or reconnecting no longer shows completion/failure popups from old Studio and Director history. Jobs that finish while connected still notify normally.
+
+My Music training, multi-LoRA mixing and extended H3 duration remain experimental. Vocal likeness and per-section voice switching are not guaranteed. Qwen Image 2.1 uses a research/evaluation license; commercial use needs a separate Qwen license.
+
+Use **Update** in Pinokio, restart Maestro and refresh the browser. Existing models, recordings, projects, LoRAs and outputs stay in place. New models and optional tools download their assets when first used.
+
+[Full v2.3.0 release notes](docs/RELEASE_NOTES_V2.3.0.md) · [Validation and limits](docs/VALIDATION_V2.3.0.md) · [Changelog](CHANGELOG.md)
+
 ### v2.2.4 (2026-09-18)
 
 **Unified AI enhancement, YuE2 music, and more control over Director productions**
@@ -117,7 +175,7 @@ Includes the full v2.2.0 feature release and v2.2.1–v2.2.3 fixes below. **New 
 - **One Enhance workflow:** develops short ideas and adapts detailed scripts to the selected model. Enhance now, or let a queued job enhance immediately before generation. An optional **Use by default** setting remembers Enhance on generation; saved source prompts and drafts remain available for review and retries.
 - **Stronger H3 prompt writing:** improved silent-action parsing, dialogue ownership, choreography, camera direction, first-frame continuity and multi-window timing. Director shares the relevant writing guidance. Prompt review remains available for drafts that need attention.
 - **YuE2 3B music:** the new default music model produces 48 kHz stereo songs, with Direct generation selected initially, optional composition planning, ABC scores and source-song covers. Later model choices are remembered.
-- **My music (Experimental):** review recordings and lyrics, train and resume personal style adapters, compare checkpoint auditions, reconstruct source audio, and import/export styles. Style and vocal resemblance vary; this is not a promise of reliable singer cloning.
+- **My music (Experimental):** prepare full songs with automatic transcription, voice selection and reviewed clips, or supply recordings and lyrics yourself. Train and resume personal style adapters, compare checkpoint auditions, reconstruct source audio, and import/export styles. New projects recommend the matched v9 tokenizer and decoder. Style and vocal resemblance vary; this is not a promise of reliable singer cloning. [Preparation guide](docs/YuE2-music.md#prepare-full-songs-automatically).
 - **Director music controls:** adjustable clip maximum and GPU limit, working Cut Speed, full-song timing, and musical/vocal cues for camera planning. Longer H3 clips can approach 14.4s; instrument cutaways retain the assigned singer's voice off screen. Shot edits now save reliably.
 - **All folders gallery:** browse and search across output folders while keeping each item's source folder and the generation destination clear. Refresh, pagination and folder-qualified actions are fixed.
 - **TaoMate H3:** optional experimental three-step Frames acceleration, with pinned downloads and compatibility checks. Includes internal token-refiner weights; it is not a separate video-refinement pass.

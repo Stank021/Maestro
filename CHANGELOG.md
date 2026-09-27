@@ -3,6 +3,229 @@
 All notable changes to Maestro are documented here. The upstream WanGP
 pipeline's own history lives in [app/docs/CHANGELOG.md](app/docs/CHANGELOG.md).
 
+## [2.4.1] - 2026-09-25
+
+Expanded Qwen Image 2.1 editing and acceleration, experimental Windows 10
+DLSS finishing, and gallery reliability and media details.
+
+- Add Qwen Image 2.1 control-image transfer, masked editing, LanPaint and
+  outpainting, with prompt enhancement that understands the selected workflow.
+  Add native 2K aspect presets and automatic aspect matching around 4.2 MP.
+- Add managed Viggle Turbo v0.1 (4 steps), v0.2 (5 steps) and v0.2.1 (6 steps)
+  profiles with the matching adapter, CFG and sampling schedule. Keep ordinary
+  user LoRAs when changing profiles. Add optional reference KV caching within
+  the available memory budget.
+- Use the Qwen base recipe of 40 steps / CFG 4 for new defaults, preserving
+  saved settings. Use capacity-aware VAE tiles with wider overlap to address
+  a possible source of the lines/seams reported in #153; confirmation from the
+  reporter is still needed. Accept an unset inpainting mode for normal image
+  generation instead of rejecting it.
+- Automatically select the H3 INT8 ConvRot video VAE for automatic VAE mode
+  with an INT8 transformer. Preserve explicit choices and the FP16 path for
+  other automatic formats; leave the audio VAE unchanged.
+- Install pinned Comfy Kitchen support and integrate compatible H3/LTX2.x
+  kernels on supported RTX 50 GPUs. Keep established kernels when unsupported
+  or when the optional acceleration is unavailable.
+- Add an opt-in Windows 10 DLSS backend for 1x neural enhancement and
+  1.5x, 1.724x, 2x and 3x upscaling in Tools, Studio finishing and Media Flow.
+  Isolate native workers, bound cleanup/cancellation, preserve video timing
+  and audio, and pad/crop internal alignment without resizing the source.
+  Reduce frame-processing copies and CPU overhead. Retain the Windows 11
+  backend and its Frame Generation requirements.
+- Fix gallery chronology while jobs run and overlapping refreshes or
+  pagination complete. Preserve selection using folder-qualified media
+  identity (#155).
+- Save finishing metadata and expose measured dimensions, duration, frame
+  rate/count, file size, timestamps, source, processing method, multiplier,
+  before/after dimensions and frame rate, and processing time where recorded.
+  Recover legacy information only when supported by saved data.
+- Add confirmed upload deletion from gallery menus, constrain deletion to
+  uploaded media and its matching sidecar, and reject inputs referenced by
+  active jobs. Show errors and restore playback after unsuccessful deletion.
+
+See [release notes](docs/RELEASE_NOTES_V2.4.1.md) and
+[validation scope](docs/VALIDATION_V2.4.1.md).
+
+## [2.4.0] - 2026-09-24
+
+Immersive gallery viewing, Qwen Image 2.1 LoRA and memory improvements,
+experimental H3 Singularity, and more control over prompt enhancement.
+
+- Add **Settings → Integrations → Prompt Enhancement** controls for zero to
+  five fidelity repair attempts, with one still the default. An optional
+  **Generate even if fidelity checks fail** setting lets Enhance on generation
+  use the saved draft after its repair attempts. Review warnings stay available;
+  actual loading, cancellation, empty-draft, and generation failures are not
+  bypassed. Automatic continuation is off by default.
+- Include enabled, compatible Qwen image models, including **Qwen Image 2.1**,
+  in Director's image selector. Honor each model's reference format, reference
+  limit, and generation defaults when creating or rerunning start images.
+
+- Reduce false camera-fidelity warnings during multi-window H3 enhancement
+  by distinguishing a recurring person or prop from a later action actually
+  happening early. Keep premature-action checks and direct repairs to the
+  affected event card without rewriting valid neighboring windows.
+  Preserve inline character notes and restrictions as context, and check
+  individual source actions even when the AI writes a long staging description.
+  Review paraphrases against exact, current visual evidence; retain genuine
+  missing-action and ordering checks. Keep first-frame instructions at the
+  opening, preserve continuous-shot coverage in fallback prompts, and carry
+  the final action's resulting state into the next window.
+  Recognize body-part descriptions and leading before/after clauses without
+  losing checks on real handoffs or reversed action order. Clarify that opening
+  and subsequent camera phases advance the action, and give explicitly recurring
+  events context for showing distinct occasions.
+  Let neighboring camera phases complete one source action while keeping other
+  events and separate recurring occasions independent. Carry accepted visible
+  action into the next window instead of treating an AI closing-state claim as
+  proof that a pending action happened. Preserve explicit opening poses and keep
+  instructions for a starting still out of later video action. Retain every
+  assigned action when fallback shots group recurring and ordinary events.
+- Scope Director music-performance instructions to the people actually shown
+  in each shot. Narrative, dance, and scenery shots no longer inherit a list
+  of singers and instrumentalists; visible performers retain their assigned
+  vocal roles, instrumental gaps, and explicitly requested expressions.
+  Remove the old injected boilerplate when recompiling saved music prompts.
+- Add experimental H3 Singularity v1.3 References with its recommended
+  LightX2V four-step Turbo LoRA, automatic downloads, and Studio/Director
+  settings. The separate INT8 checkpoint preserves existing model choices.
+  See [local testing instructions](docs/H3-Singularity.md).
+- Fix Windows Face Refiner cleanup errors discarding completed work. Release
+  mapped frame storage before cleanup and retry transient file locks without
+  replacing the original processing error (#146).
+- Fix API-key saving: retain real keys containing ellipses, recognize saved
+  masked placeholders, wait for persistence, and keep the editor open with an
+  error on failure. Save settings atomically and preserve the previous settings
+  if saving fails (#143).
+- Reduce Recast mask-composition memory use by processing one frame at a time,
+  avoiding large whole-video temporary index arrays while preserving character
+  colors, mapping priority, and overlap checks (#145).
+- Repair malformed duplicate H3 dialogue markup in Director when structured
+  dialogue supplies the exact lines and speakers, retaining the surrounding
+  visual action. Preserve per-line dialogue language through planning and saved
+  projects. When supplied audio drives a clip, keep its transcript as timing
+  metadata without generating duplicate speech (#148).
+- Send reference images to remote LLMs in streaming and non-streaming requests,
+  with native Anthropic image formatting and clearer unsupported-image errors.
+  Enhancement model overrides retain the selected provider and credentials
+  (PR #136).
+- Package the DramaBox speech and dialogue guides to remove missing-guide
+  startup warnings while preserving their existing instructions (#140).
+- Click gallery images to enlarge them, or browse images and videos in a
+  viewer that enters native fullscreen where supported. Vertical swipes move
+  the media with your finger and slide into the next item, with keyboard
+  navigation and favorites. Heart and close controls float over the media;
+  a single tap pauses or resumes video, revealing controls that fade during playback.
+  Video and controls fit the visible screen as mobile browser toolbars change size.
+  Keep the viewer's sound choice across clips without asking to unmute after each swipe.
+  Prepare the next video during the swipe animation and retain the preview until
+  its first frame is ready, avoiding a blank flash or second load at the handoff.
+  Pinch to zoom fullscreen images, then drag to inspect details and reset to resume swiping.
+  iPhone users can open Maestro from the Home Screen to browse without Safari's toolbar.
+  Dismissing the Home Screen tip is remembered for later visits.
+  Show cached first-frame video posters in the gallery and swipe previews,
+  without requiring phones to decode videos before playback. Use an opaque
+  iOS Home Screen status bar to keep its shading off the app header.
+  Compare images with a before/after divider, using the active sidecar source
+  by default or choosing other gallery and local images. Keep the sidecar
+  collapsible on touch devices in landscape as well as portrait.
+- H3 prompt enhancement treats a Music / performance timeline as the source
+  of vocals and timing, skipping dialogue writing and word-count gates while
+  retaining visual checks. Keep sustained performances across windows without
+  contradictory silence instructions, camera-style notes becoming story events,
+  or scene references being counted as characters.
+- Gallery images, captured video frames, and full videos can now be sent to
+  the active Studio or Director input, including references, Animate, video
+  editing, and upscaling. The media menu names each available destination.
+- Add a Qwen Image 2.1 filter to the CivitAI LoRA Browser and route CivitAI
+  downloads and Hugging Face imports to its separate LoRA library. Selecting
+  another model version uses that version's architecture for automatic placement.
+- Support Qwen Image 2.1 LoRAs exported with fused feed-forward layers by
+  AI Toolkit / ComfyUI, preserving their trained weights and strength instead
+  of rejecting valid adapters as belonging to a different model.
+- Qwen Image 2.1: prevent the encoder's grouped-query attention from forcing
+  large FP32 attention allocations on Windows builds without native Flash
+  Attention. Size the optional reference cache against available VRAM and
+  recompute when needed, preserving all references and output dimensions.
+  Release the cache before VAE decoding and allow cancellation between encoder layers.
+
+## [2.3.0] - 2026-09-20
+
+Qwen Image 2.1, a complete My Music training workflow, and more control over
+music LoRAs. Includes all updates since v2.2.4.
+
+- **Hotfix:** Fix Qwen Image 2.1's first-use download failing with a 404 for
+  `Qwen3-VL-8B-Instruct/added_tokens.json` after an upstream asset move. Pin
+  the complete processor export compatible with Maestro's Transformers
+  version, also avoiding a tokenizer configuration error in the relocated
+  files. Existing downloaded models are reused.
+- Add **Qwen Image 2.1 7B** for image generation, editing with up to ten
+  references, and transparent RGBA PNGs. Includes BF16/INT8 ConvRot downloads,
+  model-specific enhancement guides, separate LoRA storage, MMGP offloading
+  and tiled VAE execution. Enabled once in Model Visibility without changing
+  the selected model. Qwen Research License restrictions are shown with it.
+- YuE2 Instrumental now automatically uses Mothersuperior's instrumental AR
+  LoRA at strength 1 with Melody and chords planning and an instrumental
+  section prompt. Downloads the verified adapter on first use, pauses artist
+  LoRAs for that job, and records the recipe in song metadata. Studio, queued
+  jobs and Director music generation use the same instrumental path.
+- Music LoRAs now use the familiar searchable checkbox list and selected-weight
+  controls in Advanced. My Music's saved library has a persistent **Show in LoRA
+  selector** toggle, so only shortlisted LoRAs appear there; listing a LoRA does
+  not activate it. YuE2 supports experimental multi-LoRA mixes with independent
+  strengths and triggers, weighted sound companions, queued settings and saved
+  song metadata. Known v4/v9 tokenizer mixes are rejected; voice switching by
+  song section is not guaranteed. Loading song settings restores music LoRAs.
+- YuE2 songwriting and Music Style enhancement now emphasize the requested
+  lead vocal and delivery, retaining explicit performer names and supplied
+  training triggers instead of replacing them with generic timbre or album
+  references. Distinguish the song's subject and production influences from
+  its requested singer.
+- Add opt-in **Auto** music training: prepare songs and suggested main-voice
+  excerpts, train voice/sound then song style, and save the matched LoRA in one
+  queued run. Set targets up front (100/200 by default), stop/resume saved work,
+  and open either training stage afterward for further training or comparisons.
+  The backend advances stages even with the browser closed; automatic excerpts
+  remain marked unreviewed and check-only songs stay out of training.
+- Simplify My Music training into a guided recordings → voice/sound → song
+  style → test-song workflow. Carry the learned voice into the next stage,
+  reopen existing style projects, and keep technical controls, alternate methods
+  and older checkpoints in Expert settings. Clarify that lyrics are already
+  included; optional word timing is a separate experiment. Preserve existing
+  ranks, objectives and unfinished step targets when resuming.
+- Move YuE2 music LoRA selection and strength into Advanced → LoRAs & presets,
+  with an active badge and the automatically applied training trigger shown.
+  Add searchable saved LoRAs and reversible Remove / Restore library controls;
+  preserve trained weights, queued jobs, training projects and generated songs.
+- My Music: separate author voice/sound adaptation from AR song-style training.
+  Train a matched real-audio tokenizer and decoder with waveform supervision,
+  compare original/before/after sound, then train AR with freshly prepared tokens.
+  Save/resume paired checkpoints without changing previous styles. Clarify
+  check-only recordings and add language-controlled song rescanning that keeps
+  reviewed/manual clips; long-song transcription no longer inherits one opening
+  language guess for the full track. Voice resemblance remains experimental.
+- My Music: prepare full songs without supplying lyrics first. Separate vocals,
+  transcribe timed words, preview detected voices, and suggest phrase-based
+  excerpts. Review voice choices, lyrics, descriptions, vocal delivery and clip
+  boundaries before creating an immutable training dataset. Whole-song held-out
+  splits, cached stages and queue-aware cancellation preserve original audio and
+  existing projects. New projects recommend v9; legacy projects keep their pair.
+- My Music: import combined AI-Toolkit YuE2 adapters, with both musical and
+  acoustic branches preserved. Fix music-style ZIP imports on Python 3.10.
+- Add experimental joint music/audio training with matched checkpoints,
+  resumable optimizer state, and fixed checkpoint auditions. Support matched v9
+  tokenizer/decoder projects; existing v4 projects keep their original assets.
+  Joint training can also refine a saved style, preserving its existing decoder
+  and saving a baseline before training; original saved styles remain intact.
+- Stop replaying old completion and failure notifications when opening Maestro
+  or reconnecting to saved Studio/Director history. Active jobs still notify
+  when they finish, and completed history no longer starts status polling.
+- Add an opt-in **Allow 30s clips · Experimental** switch to Studio's H3
+  Duration settings. Frames and References can use a single 719-frame pass
+  (29.96 seconds at 24 fps), including queued enhancement and restored jobs.
+  Auto keeps its existing GPU recommendations. Longer passes require more
+  memory and time and may lose consistency; Animate retains its fixed window.
+
 ## [2.2.4] - 2026-09-18
 
 Includes the full v2.2.0 feature release and v2.2.1–v2.2.3 fixes below, plus:

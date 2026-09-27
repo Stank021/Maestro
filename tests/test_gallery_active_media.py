@@ -44,7 +44,8 @@ class GalleryActiveMediaTests(unittest.TestCase):
             ROOT / "ui" / "src" / "components" / "MainContent" / "MediaFeedItem.tsx"
         ).read_text(encoding="utf-8")
 
-        self.assertIn("Show generation details", feed_item)
+        self.assertIn("Show media details", feed_item)
+        self.assertIn("<MediaMetadataDetails", feed_item)
         self.assertIn("Active LoRAs", feed_item)
         self.assertIn("Optimizations", feed_item)
         self.assertIn("Turbo preset", feed_item)
@@ -98,12 +99,16 @@ class GalleryActiveMediaTests(unittest.TestCase):
             "Retake a time region",
             "Extend this video",
             "Copy prompt",
-            "Use current frame as reference",
             "Download",
             "Move to workspace",
             "Delete output",
         ):
             self.assertIn(label, feed_item)
+        self.assertIn(
+            "Use ${target.kind === 'image' ? 'current frame' : 'video'} as ${target.label}",
+            feed_item,
+        )
+        self.assertIn("Use as ${target.label}", feed_item)
 
         self.assertIn("Click again to delete", feed_item)
         self.assertIn("No other workspaces", feed_item)

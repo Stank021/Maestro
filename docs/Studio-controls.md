@@ -10,6 +10,8 @@ The fixed settings strip keeps Characters on the left and groups Recipes, Resolu
 
 Video Duration has **Time** and **Window** tabs. The **Auto** toggle and current duration stay visible above both tabs. Enabling Auto from either view returns to Time and follows the automatic recommendation. The time slider, presets and custom time entry appear dimmed but remain interactive: grabbing the slider, adjusting it with arrow keys, choosing a preset or editing the timecode turns Auto off immediately. You can also turn Auto off explicitly. Time uses the model-aligned slider through five minutes, or **10m, 15m, 30m, 60m or Custom** where supported. Window retains its exact count presets, slider and number field. Adjustable **Window Length** stays visible and automatically follows shorter durations up to the GPU recommendation or saved/manual limit. Automatic sizing continues while the popup is closed. Window overrides and saved GPU/model preferences work as before. **Window overlap** starts collapsed in both tabs and opens when needed; unsupported overlap controls remain hidden. H3 Reference sequences keep their **Carry motion and sound between windows** option here. Speech and Director retain their specialized duration controls.
 
+For H3 **Frames** and **References**, open Duration and enable **Allow 30s clips · Experimental** above Window Length. This sets the manual window limit to 30s. Choose **Time → Custom → 00:00:30**, or **Window → 1**, for one pass without continuation windows. H3's frame spacing makes this 719 frames (29.96s at 24 fps). You can lower Window Length to experiment with shorter passes. Longer timelines can still use multiple extended windows. Selecting Auto exits the experiment and restores GPU-based sizing. This exceeds the model's published 15s duration: it needs more VRAM and time, and motion or identity may drift. The setting travels with queued jobs and output settings; Animate's fixed motion-transfer windows and audio-reference limits are unchanged.
+
 On mobile, settings overlays fit within the sidebar. Video Duration opens directly above its button with a compact, steady height while values change. Additional controls scroll inside it. Sequence details sit below the sliders, so switching between one window and a longer sequence does not move the slider you are adjusting. The panel follows its button when the keyboard or available screen size changes. Close it with Escape, its indicator, or a click outside.
 
 Image generation includes **21:9** ultrawide alongside the other aspect ratios. Choosing a fixed aspect while Resolution is **Auto** selects **720p** so the generated image uses that shape; you can then choose another resolution tier.
@@ -25,6 +27,24 @@ including items beyond the first page. Media type, Favorites and Multi-clip filt
 apply before pagination. Each result shows its source folder; use that label to open
 the folder. Favorites, deletion, download, reference reuse and Editor import retain
 that origin even when another folder contains an identically named file.
+
+Gallery cards show a local date and time. Open **Info** for the exact timestamp,
+file size, measured resolution, and video/audio duration. Videos also show their
+frame rate and frame count when recorded in the file. Dates are labeled Generated,
+Processed, Uploaded, or File date according to the available record.
+
+Upscaled and enhanced outputs include a **Processing** section: method (such as
+DLSS, FlashVSR or Lanczos), spatial multiplier, before/after dimensions, source,
+processing time, and frame-rate changes or DLSS settings where applicable. New
+outputs retain these measurements even after the source is removed. Older Tools
+outputs recover available details from saved settings and an existing source;
+unknown dimensions are left unknown.
+
+In **Uploads**, choose **More → Delete upload**, then click again to confirm.
+This removes the uploaded source and its metadata, while generated outputs stay.
+Saved setups that reference the removed source will need a replacement upload.
+Maestro refuses deletion while an active or queued Studio job or active Director
+project still uses the file. A locked-file error leaves the item visible for retry.
 
 ## Characters and media
 

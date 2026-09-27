@@ -1,6 +1,6 @@
 import { outputIdentity } from '../../lib/galleryIdentity'
 import { useState, useRef, useEffect, useCallback, type CSSProperties } from 'react'
-import { Play, Pencil, RefreshCw, Copy, Trash2, Check, Combine, Loader2, Heart, ArrowLeftToLine, Download, FolderInput, Scissors, FastForward, BookMarked, Info, ChevronDown, ChevronUp, MoreHorizontal, ScanFace } from 'lucide-react'
+import { Play, Pencil, RefreshCw, Copy, Trash2, Check, Combine, Loader2, Heart, ArrowLeftToLine, Download, FolderInput, Scissors, FastForward, BookMarked, Info, ChevronDown, ChevronUp, MoreHorizontal, ScanFace, Maximize2, Columns2 } from 'lucide-react'
 import { SaveRecipeDialog } from '../Recipes/SaveRecipeDialog'
 import { FaceRefinerDialog } from '../Characters/FaceRefiner'
 import { useStore } from '../../stores/useStore'
@@ -9,6 +9,10 @@ import type { OutputFile, OutputMetadata } from '../../types'
 import { formatGenerationDuration } from '../../lib/format'
 import { formatDuration } from '../../lib/durationPlanning'
 import { modelDisplayName } from '../../lib/modelDisplay'
+import { sendToGalleryInput, useGalleryInputs, type GalleryInputTarget } from '../../lib/galleryInputs'
+import { getVideoPosterUrl } from '../../lib/thumbnailCache'
+import { getMediaTimestamp } from '../../lib/mediaTimestamp'
+import { MediaMetadataDetails } from './MediaMetadataDetails'
 
 interface Props {
   file: OutputFile
@@ -17,6 +21,7 @@ interface Props {
   onActivate: (index: number) => void
   onPlaybackStart: (index: number, media: HTMLMediaElement) => void
   onMeasured: (index: number, height: number) => void
+  onOpenViewer?: (file: OutputFile, options?: { compare?: boolean; currentTime?: number }) => void
   style?: CSSProperties
 }
 
@@ -72,7 +77,7 @@ function RetryImage({ url, alt }: { url: string; alt: string }) {
   )
 }
 
-export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackStart, onMeasured, style }: Props) {
+export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackStart, onMeasured, onOpenViewer, style }: Props) {
   const browsingAllFolders = useStore(s => s.browsingAllFolders)
   const switchWorkspace = useStore(s => s.switchWorkspace)
   const setSelectedOutput = useStore(s => s.setSelectedOutput)
@@ -81,20 +86,17 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
   const deleteOutput = useStore(s => s.deleteSelectedOutput)
   const rejoinClipGroup = useStore(s => s.rejoinClipGroup)
   const toggleFavorite = useStore(s => s.toggleFavorite)
-  const setStartImage = useStore(s => s.setStartImage)
-  const addImageRef = useStore(s => s.addImageRef)
   const setContinueVideo = useStore(s => s.setContinueVideo)
   const setStudioVideoWorkflow = useStore(s => s.setStudioVideoWorkflow)
   const setSidebarMode = useStore(s => s.setSidebarMode)
   const setSidebarOpen = useStore(s => s.setSidebarOpen)
   const openRetakeDialog = useStore(s => s.openRetakeDialog)
-  const generationMode = useStore(s => s.generationMode)
+  const inputTargets = useGalleryInputs(s => s.targets)
+  const receivingGalleryInput = useGalleryInputs(s => s.receiving)
   const workspaces = useStore(s => s.workspaces)
   const activeWorkspace = useStore(s => s.activeWorkspace)
-  // Virtual Uploads view: browse-only. Move/favorite/delete resolve
-  // against the active OUTPUT workspace server-side, so they can't act
-  // on upload files — hide them. Download + send-to-input still work
-  // (serve_file falls back to the uploads folder).
+  // Uploads stay outside workspace move/favorite actions. Their dedicated
+  // delete endpoint is safe for this virtual folder.
   const browsingUploads = useStore(s => s.browsingUploads)
   // Used to translate the raw model_type slug (e.g.
   // "ltx2_22B_distilled_1_1") in the per-clip metadata bar into the
@@ -108,14 +110,20 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
   const [meta, setMeta] = useState<OutputMetadata | null>(null)
   const [metaLoaded, setMetaLoaded] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState(false)
   const [showSaveRecipe, setShowSaveRecipe] = useState(false)
   const [showFaceRefiner, setShowFaceRefiner] = useState(false)
   const confirmRef = useRef(false)
+  const deletingRef = useRef(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [copied, setCopied] = useState(false)
   const [copiedOriginalPrompt, setCopiedOriginalPrompt] = useState(false)
   const [rejoining, setRejoining] = useState(false)
-  const [sentToInput, setSentToInput] = useState(false)
+  const [sentToInput, setSentToInput] = useState('')
+  const sentToInputTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const [sendingToInput, setSendingToInput] = useState('')
+  const [inputError, setInputError] = useState('')
   const [showActionMenu, setShowActionMenu] = useState(false)
   const [actionMenuOpensDown, setActionMenuOpensDown] = useState(false)
   const [showMoveMenu, setShowMoveMenu] = useState(false)
@@ -124,6 +132,12 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
   const actionMenuRef = useRef<HTMLDivElement>(null)
   const itemRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
+
+  useEffect(() => () => {
+    clearTimeout(sentToInputTimer.current)
+    clearTimeout(timeoutRef.current)
+  }, [])
 
   // Measure actual height and report to parent
   useEffect(() => {
@@ -181,6 +195,7 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
 
   const params = meta?.params as Record<string, unknown> | null
   const uploadFilenames = meta?.upload_filenames as Record<string, string | string[]> | undefined
+  const mediaTimestamp = getMediaTimestamp(meta?.timestamp, file.created_at)
 
   const h3WindowPlan = (
     params?.h3_window_plan && typeof params.h3_window_plan === 'object'
@@ -259,7 +274,10 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
   const modelType = (params?.model_type as string) || ''
   const modelLabel = modelDisplayName(modelType, models)
   const isAudio = file.type === 'audio'
-  const resolution = isAudio ? '' : ((params?.resolution as string) || '')
+  const actualResolution = !isAudio && meta?.media_info?.width && meta.media_info.height
+    ? `${meta.media_info.width} × ${meta.media_info.height}`
+    : ''
+  const resolution = isAudio ? '' : (actualResolution || (params?.resolution as string) || '')
   const seed = params?.seed as number | undefined
   const generationTime = meta?.generation_time
   const inferenceSteps = params?.num_inference_steps as number | undefined
@@ -413,9 +431,11 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
   )
 
   const handleDelete = async () => {
+    if (deletingRef.current) return
     if (!confirmRef.current) {
       confirmRef.current = true
       setConfirmDelete(true)
+      setDeleteError('')
       clearTimeout(timeoutRef.current)
       timeoutRef.current = setTimeout(() => {
         confirmRef.current = false
@@ -426,15 +446,55 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
     clearTimeout(timeoutRef.current)
     confirmRef.current = false
     setConfirmDelete(false)
-    // Release video element src to unlock the file on Windows
-    if (videoRef.current) {
-      videoRef.current.pause()
-      videoRef.current.removeAttribute('src')
-      videoRef.current.load()
+    setDeleteError('')
+    deletingRef.current = true
+    setDeleting(true)
+
+    // Releasing the browser media request can let Windows remove an unlocked
+    // file. If deletion fails, restore the same URL, playhead and play state.
+    const media = videoRef.current || audioRef.current
+    const playback = media ? {
+      element: media,
+      source: media.getAttribute('src') || file.url,
+      currentTime: media.currentTime,
+      wasPlaying: !media.paused,
+    } : null
+    const restorePlayback = () => {
+      if (!playback || !playback.element.isConnected) return
+      const element = playback.element
+      const restore = () => {
+        element.removeEventListener('loadedmetadata', restore)
+        try { element.currentTime = playback.currentTime } catch { /* seek may be unavailable */ }
+        if (playback.wasPlaying) void element.play().catch(() => {})
+      }
+      element.addEventListener('loadedmetadata', restore, { once: true })
+      element.setAttribute('src', playback.source)
+      element.load()
+      if (element.readyState >= 1) restore()
+    }
+    if (media) {
+      media.pause()
+      media.removeAttribute('src')
+      media.load()
     }
     setSelectedOutput(index)
-    // Small delay to let the browser release the file handle
-    setTimeout(() => deleteOutput(file), 200)
+    try {
+      const result = await deleteOutput(file)
+      if (!result.ok) {
+        restorePlayback()
+        setDeleteError(result.error || `Could not delete ${browsingUploads ? 'upload' : 'output'}.`)
+        return
+      }
+      setShowActionMenu(false)
+    } catch (error) {
+      // Store actions return failures, but keep the component resilient if
+      // another caller implementation rejects in the future.
+      restorePlayback()
+      setDeleteError(error instanceof Error ? error.message : String(error))
+    } finally {
+      deletingRef.current = false
+      setDeleting(false)
+    }
   }
 
   const handleRejoin = async () => {
@@ -457,8 +517,15 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
         setShowMoveMenu(false)
       }
     }
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setShowActionMenu(false); setShowMoveMenu(false) }
+    }
     document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', escape)
+    }
   }, [showActionMenu])
 
   const handleMove = async (targetWs: string) => {
@@ -478,42 +545,61 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
     }
   }
 
-  const handleSendToInput = async () => {
-    if (file.type !== 'image') return
+  const handleSendToInput = async (target: GalleryInputTarget, captureFrame = false) => {
+    if (sendingToInput) return
+    setSendingToInput(target.id)
+    setInputError('')
     try {
-      const res = await fetch(getFileUrl(file.name, file.workspace))
-      const blob = await res.blob()
-      const imageFile = new File([blob], file.name, { type: blob.type || 'image/png' })
-      if (generationMode === 'image') {
-        addImageRef(imageFile)
+      let media: File
+      if (captureFrame) {
+        media = await captureCurrentFrame()
       } else {
-        setStartImage(imageFile)
+        const res = await fetch(getFileUrl(file.name, file.workspace))
+        if (!res.ok) throw new Error(`Could not read gallery media (${res.status}).`)
+        const blob = await res.blob()
+        media = new File([blob], file.name, {
+          type: blob.type.startsWith(`${file.type}/`) ? blob.type : file.type === 'video' ? 'video/mp4' : 'image/png',
+        })
       }
-      setSentToInput(true)
-      setTimeout(() => setSentToInput(false), 2000)
+      await sendToGalleryInput(target.id, media)
+      clearTimeout(sentToInputTimer.current)
+      setSentToInput(target.id)
+      sentToInputTimer.current = setTimeout(() => setSentToInput(''), 2000)
+      setSidebarOpen(true)
     } catch (e) {
-      console.error('Failed to send image to input:', e)
+      setInputError(e instanceof Error ? e.message : 'Could not send media to this input.')
+    } finally {
+      setSendingToInput('')
     }
   }
 
-  // Capture the frame the video preview is currently SHOWING (canvas grab
-  // of the <video> element at its currentTime — same-origin, so no taint)
-  // and append it to the Reference tiles. Pairs with SCAIL-2: scrub to the
-  // pose you want, one click, it's your character reference.
-  const handleSendFrameToRefs = async () => {
-    if (file.type !== 'video') return
+  // Send the displayed frame through the same image input as a gallery still.
+  const captureCurrentFrame = async (): Promise<File> => {
+    let temporaryVideo: HTMLVideoElement | null = null
     try {
       let video = videoRef.current
-      if (!video || video.videoWidth === 0) {
-        // Preview not loaded (never hovered) — decode frame 0 offscreen.
+      if (!video || video.readyState < 2 || video.videoWidth === 0 || video.seeking) {
+        // Load offscreen without disturbing playback. Preserve a pending seek
+        // instead of silently substituting frame zero for the selected frame.
+        const requestedTime = video?.currentTime || 0
         video = document.createElement('video')
-        video.src = getFileUrl(file.name, file.workspace)
+        temporaryVideo = video
         video.muted = true
+        video.playsInline = true
         await new Promise<void>((resolve, reject) => {
-          video!.onloadeddata = () => resolve()
-          video!.onerror = () => reject(new Error('video load failed'))
+          const timer = setTimeout(() => reject(new Error('Video frame loading timed out.')), 15000)
+          video!.onloadeddata = () => { clearTimeout(timer); resolve() }
+          video!.onerror = () => { clearTimeout(timer); reject(new Error('Could not load the video frame.')) }
+          video!.src = getFileUrl(file.name, file.workspace)
+        })
+        if (requestedTime > 0) await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('Video frame seeking timed out.')), 15000)
+          video!.onseeked = () => { clearTimeout(timer); resolve() }
+          video!.onerror = () => { clearTimeout(timer); reject(new Error('Could not seek to the selected frame.')) }
+          video!.currentTime = requestedTime
         })
       }
+      const frameTime = video.currentTime
       const canvas = document.createElement('canvas')
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
@@ -524,12 +610,15 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
         canvas.toBlob(b => (b ? resolve(b) : reject(new Error('frame capture failed'))), 'image/png')
       )
       const stem = file.name.replace(/\.[^.]+$/, '')
-      const frameFile = new File([blob], `${stem}_t${video.currentTime.toFixed(2)}s.png`, { type: 'image/png' })
-      addImageRef(frameFile)
-      setSentToInput(true)
-      setTimeout(() => setSentToInput(false), 2000)
-    } catch (e) {
-      console.error('Failed to capture video frame:', e)
+      return new File([blob], `${stem}_t${frameTime.toFixed(2)}s.png`, { type: 'image/png' })
+    } finally {
+      if (temporaryVideo) {
+        temporaryVideo.onloadeddata = null
+        temporaryVideo.onseeked = null
+        temporaryVideo.onerror = null
+        temporaryVideo.removeAttribute('src')
+        temporaryVideo.load()
+      }
     }
   }
 
@@ -615,6 +704,8 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
             ref={videoRef}
             key={file.url}
             src={file.url}
+            poster={getVideoPosterUrl(file.url) ?? undefined}
+            preload="none"
             controls
             loop
             playsInline
@@ -630,6 +721,7 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
             </div>
             <p className="text-xs text-text-muted mb-2">{file.name}</p>
             <audio
+              ref={audioRef}
               key={file.url}
               src={file.url}
               controls
@@ -638,8 +730,21 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
               onPlay={handlePlaybackStart}
             />
           </div>
+        ) : onOpenViewer ? (
+          <button type="button" className="h-full w-full cursor-zoom-in focus-visible:outline-2 focus-visible:outline-accent-blue"
+            aria-label={`Enlarge ${file.name}`} title="Click to enlarge"
+            onClick={event => { event.stopPropagation(); handleSelect(); onOpenViewer(file) }}>
+            <RetryImage key={file.url} url={file.url} alt={file.name} />
+          </button>
         ) : (
           <RetryImage key={file.url} url={file.url} alt={file.name} />
+        )}
+        {file.type === 'video' && onOpenViewer && (
+          <button type="button" className="absolute top-2 right-2 rounded-lg bg-black/65 p-2 text-white hover:bg-black/85"
+            aria-label="Open full-screen gallery" title="Open full-screen gallery"
+            onClick={event => { event.stopPropagation(); handleSelect(); onOpenViewer(file, {currentTime: videoRef.current?.currentTime}) }}>
+            <Maximize2 size={17} />
+          </button>
         )}
       </div>
 
@@ -699,6 +804,11 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
           ) : (
             <div className="text-[11px] text-text-muted animate-pulse">Loading...</div>
           )}
+          {mediaTimestamp && (
+            <div className="mt-0.5 truncate text-[10px] text-text-muted" title={`${mediaTimestamp.label} · ${mediaTimestamp.exact}`}>
+              {mediaTimestamp.compact}
+            </div>
+          )}
         </div>
 
         {browsingAllFolders && file.workspace && (
@@ -711,8 +821,7 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
 
         {/* Four persistent controls; secondary actions are labeled in More. */}
         <div ref={actionMenuRef} className="relative flex shrink-0 items-center gap-0.5" onClick={e => e.stopPropagation()}>
-          {params && (
-            <button
+          <button
               onClick={() => {
                 onActivate(index)
                 setShowDetails(value => !value)
@@ -724,16 +833,15 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
                   ? 'bg-bg-active text-accent-blue'
                   : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
               }`}
-              title={showDetails ? 'Hide generation details' : 'Show generation details'}
-              aria-label={showDetails ? 'Hide generation details' : 'Show generation details'}
+              title={showDetails ? 'Hide media details' : 'Show media details'}
+              aria-label={showDetails ? 'Hide media details' : 'Show media details'}
               aria-expanded={showDetails}
             >
               <span className="flex items-center gap-0.5">
                 <Info size={14} />
                 {showDetails ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
               </span>
-            </button>
-          )}
+          </button>
           {params && (
             <button
               onClick={() => {
@@ -798,6 +906,20 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
               <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
                 Clip actions
               </div>
+              {file.type !== 'audio' && onOpenViewer && (
+                <button type="button" role="menuitem"
+                  onClick={() => { setShowActionMenu(false); onOpenViewer(file, {currentTime: videoRef.current?.currentTime}) }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary">
+                  <Maximize2 size={14} className="text-accent-blue" /><span>Open full-screen gallery</span>
+                </button>
+              )}
+              {file.type === 'image' && onOpenViewer && (
+                <button type="button" role="menuitem"
+                  onClick={() => { setShowActionMenu(false); onOpenViewer(file, {compare: true}) }}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary">
+                  <Columns2 size={14} className="text-accent-blue" /><span>Compare images</span>
+                </button>
+              )}
               {file.type === 'video' && (
                 <button
                   role="menuitem"
@@ -884,26 +1006,26 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
                   <span>{copied ? 'Prompt copied' : 'Copy prompt'}</span>
                 </button>
               )}
-              {file.type === 'image' && (
+              {(file.type === 'image' || file.type === 'video') && inputTargets
+                .filter(target => target.kind === 'image' || file.type === 'video')
+                .map(target => (
                 <button
+                  key={target.id}
                   role="menuitem"
-                  onClick={handleSendToInput}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-accent-blue"
+                  onClick={() => void handleSendToInput(target, file.type === 'video' && target.kind === 'image')}
+                  disabled={!!sendingToInput || receivingGalleryInput || !!target.disabledReason}
+                  title={target.disabledReason}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-accent-blue disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {sentToInput ? <Check size={14} className="text-accent-green" /> : <ArrowLeftToLine size={14} />}
-                  <span>{generationMode === 'image' ? 'Use as input image' : 'Use as start frame'}</span>
+                  {sendingToInput === target.id ? <Loader2 size={14} className="animate-spin shrink-0" />
+                    : sentToInput === target.id ? <Check size={14} className="text-accent-green shrink-0" />
+                      : <ArrowLeftToLine size={14} className="shrink-0" />}
+                  <span>{file.type === 'video'
+                    ? `Use ${target.kind === 'image' ? 'current frame' : 'video'} as ${target.label}`
+                    : `Use as ${target.label}`}</span>
                 </button>
-              )}
-              {file.type === 'video' && (
-                <button
-                  role="menuitem"
-                  onClick={handleSendFrameToRefs}
-                  className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-accent-blue"
-                >
-                  {sentToInput ? <Check size={14} className="text-accent-green" /> : <ArrowLeftToLine size={14} />}
-                  <span>Use current frame as reference</span>
-                </button>
-              )}
+              ))}
+              {inputError && <p role="alert" className="px-2.5 py-2 text-xs text-red-400">{inputError}</p>}
               <button
                 role="menuitem"
                 onClick={() => {
@@ -947,40 +1069,45 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
                   )}
                 </>
               )}
-              {!browsingUploads && (
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    const alreadyConfirmed = confirmRef.current
-                    handleDelete()
-                    if (alreadyConfirmed) setShowActionMenu(false)
-                  }}
-                  className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${
-                    confirmDelete
-                      ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
-                      : 'text-text-secondary hover:bg-bg-hover hover:text-red-400'
-                  }`}
-                >
-                  <Trash2 size={14} />
-                  <span>{confirmDelete ? 'Click again to delete' : 'Delete output'}</span>
-                </button>
+              <button
+                role="menuitem"
+                onClick={() => void handleDelete()}
+                disabled={deleting}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs transition-colors disabled:opacity-50 ${
+                  confirmDelete
+                    ? 'bg-red-500/15 text-red-400 hover:bg-red-500/25'
+                    : 'text-text-secondary hover:bg-bg-hover hover:text-red-400'
+                }`}
+              >
+                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                <span>{deleting ? 'Deleting…' : confirmDelete
+                  ? `Click again to delete ${browsingUploads ? 'upload' : 'output'}`
+                  : browsingUploads ? 'Delete upload' : 'Delete output'}</span>
+              </button>
+              {browsingUploads && (
+                <p className="px-2.5 pb-1 text-[10px] leading-relaxed text-text-muted">
+                  Removes this source file from Uploads. Completed outputs stay.
+                </p>
               )}
+              {deleteError && <p role="alert" className="px-2.5 py-2 text-xs text-red-400">{deleteError}</p>}
             </div>
           )}
         </div>
       </div>
-      {showDetails && params && (
+      {showDetails && (
         <div
           className="rounded-b-[10px] border-t border-border bg-bg-secondary/70 px-3 py-3"
           onClick={event => event.stopPropagation()}
         >
+          <MediaMetadataDetails file={file} metadata={meta} />
+          {params && <>
           <div className="flex flex-wrap gap-1.5 mb-3">
             {h3Workflow && (
               <span className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-secondary">
                 {h3Workflow}
               </span>
             )}
-            {resolution && (
+            {resolution && !actualResolution && (
               <span className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-secondary">
                 {resolution}
               </span>
@@ -1017,9 +1144,16 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
               <dt className="text-text-muted">Audio</dt>
               <dd className="text-text-secondary">{meta.model_details.sample_rate / 1000} kHz · {meta.model_details.channels === 2 ? 'stereo' : `${meta.model_details.channels} channel`}</dd>
             </>}
-            {meta?.model_details?.artist && <>
-              <dt className="text-text-muted">Music style</dt>
-              <dd className="break-words text-text-secondary">{meta.model_details.artist.name} · strength {meta.model_details.artist.strength}</dd>
+            {(meta?.model_details?.artists?.length || meta?.model_details?.artist) && <>
+              <dt className="text-text-muted">Music LoRAs</dt>
+              <dd className="break-words text-text-secondary">
+                {(meta.model_details.artists?.length ? meta.model_details.artists : [meta.model_details.artist!]).map(artist =>
+                  <div key={artist.id}>{artist.name} · strength {artist.strength}</div>)}
+              </dd>
+            </>}
+            {meta?.model_details?.instrumental && <>
+              <dt className="text-text-muted">Instrumental</dt>
+              <dd className="text-text-secondary">Instrumental LoRA · strength {meta.model_details.instrumental.strength} · Melody and chords</dd>
             </>}
             {meta?.model_details?.plan?.abc && <>
               <dt className="text-text-muted">Composition</dt>
@@ -1031,7 +1165,7 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
                 <dd className="text-text-secondary">{h3Workflow}</dd>
               </>
             )}
-            {resolution && (
+            {resolution && !actualResolution && (
               <>
                 <dt className="text-text-muted">Resolution</dt>
                 <dd className="text-text-secondary">{resolution}</dd>
@@ -1267,6 +1401,7 @@ export function MediaFeedItem({ file, index, isActive, onActivate, onPlaybackSta
               ))}
             </div>
           )}
+          </>}
         </div>
       )}
       {showSaveRecipe && (

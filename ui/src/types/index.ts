@@ -15,6 +15,7 @@ export interface DirectorCapabilityResult {
 
 export interface DirectorModelCompatibility {
   image: DirectorCapabilityResult
+  image_reference_mode?: '' | 'I' | 'KI'
   video: Record<DirectorPipelineType | 'seamless', DirectorCapabilityResult>
   supports_audio_input: boolean
   generates_audio: boolean
@@ -82,6 +83,7 @@ export interface GenerateParams {
   video_length: number
   num_inference_steps: number
   guidance_scale: number
+  sample_solver?: string
   seed: number
   image_mode: number
   negative_prompt: string
@@ -97,6 +99,7 @@ export interface GenerateParams {
   sliding_window_discard_last_frames?: number
   /** Explicitly honor a manually locked window above the model's VRAM-aware recommendation. */
   sliding_window_memory_override?: boolean
+  minimax_h3_extended_duration?: boolean
   /** Optional model-specific transformer step cache. */
   skip_steps_cache_type?: '' | 'first_block'
   /** First Block Cache residual-change threshold. */
@@ -483,6 +486,8 @@ export interface PromptEnhancementRecord {
 export interface GenerationJob {
   enhancement?: PromptEnhancementRecord | null
   id: string
+  /** First observation is a saved queue snapshot, not a new terminal event. */
+  restoredFromHistory?: boolean
   /** Direct submissions stay visible while the backend is queued/planning. */
   showInGallery?: boolean
   kind?: 'generation' | 'editor_export' | string
@@ -774,7 +779,7 @@ export interface EditorExportCapabilities {
 
 export type MediaFilter = 'all' | 'images' | 'videos' | 'audio' | 'avatars' | 'multiclip' | 'favorites'
 export type AspectRatio = 'auto' | '21:9' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
-export type ResolutionPreset = 'auto' | '480p' | '540p' | '720p' | '768p' | '1080p'
+export type ResolutionPreset = 'auto' | '480p' | '540p' | '720p' | '768p' | '1080p' | '2k'
 export type ScailResolutionProfile = '480p' | '512p' | '704p'
 /** Backward-compatible name for saved Recast/API callers. */
 export type RecastResolutionProfile = ScailResolutionProfile
@@ -961,6 +966,9 @@ export interface ModelOptions {
     label: string
     experimental: boolean
     preset_id: string
+    /** Selected model recommends this recipe on first selection. */
+    default_enabled?: boolean
+    unaccelerated_steps?: number | null
     version_label: string
     steps: number
     weight: number
@@ -1019,6 +1027,19 @@ export interface ModelOptions {
   background_removal_label: string | null
   max_image_refs?: number | null
   sample_solvers: [string, string][] | null
+  qwen21_acceleration_profiles?: Record<string, {
+    label: string
+    sample_solver: string
+    steps: number
+    guidance: number
+  }> | null
+  image_ref_inpaint?: boolean
+  model_modes?: {
+    choices: [string, number][]
+    default: number
+    label: string
+    image_modes?: number[]
+  } | null
   self_refiner: boolean
   self_refiner_max_plans: number
   sliding_window_defaults: Record<string, number> | null
@@ -1110,6 +1131,36 @@ export interface MultiWindowTiming {
   total_generation_seconds: number
 }
 
+export interface OutputMediaInfo {
+  width?: number
+  height?: number
+  fps?: number
+  frames?: number
+  duration_seconds?: number
+  size_bytes?: number
+}
+
+export interface OutputTimestamp {
+  /** Unix timestamp in seconds. */
+  value: number
+  kind: 'generated' | 'processed' | 'uploaded' | 'file_modified'
+}
+
+export interface OutputProcessingInfo {
+  method?: string
+  method_label?: string
+  multiplier?: number
+  temporal_method?: string
+  temporal_label?: string
+  frame_multiplier?: number
+  source_name?: string
+  input?: OutputMediaInfo
+  output?: OutputMediaInfo
+  elapsed_seconds?: number
+  completed_at?: number
+  options?: Record<string, unknown>
+}
+
 export interface OutputMetadata {
   model_details?: {
     architecture?: string
@@ -1119,6 +1170,9 @@ export interface OutputMetadata {
     plan?: { abc?: string; request?: Record<string, unknown> }
     truncated?: Record<string, boolean>
     artist?: { id: string; name: string; strength: number; tokenizer_revision: string }
+    artists?: Array<{ id: string; name: string; strength: number; tokenizer_revision: string | null }>
+    artist_mix?: string
+    instrumental?: { repo_id: string; revision: string; file: string; sha256: string; strength: number; cot: string; decoder: string }
   }
   source: 'sidecar' | 'embedded' | 'none'
   params: Record<string, unknown> | null
@@ -1141,6 +1195,9 @@ export interface OutputMetadata {
   multi_window_timing?: MultiWindowTiming
   job_elapsed_time?: number
   created_at?: number
+  media_info?: OutputMediaInfo
+  timestamp?: OutputTimestamp
+  processing?: OutputProcessingInfo
 }
 
 export interface WebPushStatus {
@@ -1191,6 +1248,8 @@ export interface ServicesConfig {
   llm_remote_api_key_set: boolean
   enhance_llm_model_id: string
   enhance_llm_device: string
+  enhance_fidelity_retries?: number
+  enhance_fidelity_auto_continue?: boolean
   google_api_key: string
   google_api_key_set: boolean
   openai_api_key: string
@@ -1612,6 +1671,7 @@ export interface DialogueBeat {
   delivery?: string
   physical_cue?: string
   priority?: 'low' | 'medium' | 'high'
+  language?: string
 }
 
 export interface CameraPlan {

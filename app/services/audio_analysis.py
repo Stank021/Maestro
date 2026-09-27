@@ -657,6 +657,8 @@ def get_diarizer_pipeline(profile: str = "speech"):
         print(f"[Diarization] torchaudio shim skipped ({e}); pyannote may fail to import")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    from shared.torchaudio_compat import ensure_pyannote_audio_compat
+    ensure_pyannote_audio_compat()
     _base = os.path.dirname(os.path.abspath(__file__))
     _project_root = os.path.normpath(os.path.join(_base, "..", ".."))
     _app_root = os.path.normpath(os.path.join(_base, ".."))

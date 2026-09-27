@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 
-
 _MODEL_TYPE = "minimax_h3"
 _REF2VA_MODEL_TYPE = "minimax_h3_ref2va"
 _FULL_MODEL_TYPE = "minimax_h3_full"
@@ -20,6 +19,17 @@ _EXPERIMENTAL_VAE_REPO = "Kijai/MiniMax-H3-experimental"
 _EXPERIMENTAL_VAE_REVISION = "a3e7d8da4ae7ba8df0779094cf5ab9d6ee855fe4"
 _FUSED_MODEL_REPO = "MATLOWAI/minimax-h3-fused-turbo-int8-convrot"
 _FUSED_MODEL_REVISION = "3b51096a1bf67608d98131116558202208fcf195"
+_SINGULARITY_MODEL_ID = "minimax_h3_ref2va_singularity"
+_SINGULARITY_DEFAULT_TURBO_PRESET = "lightx2v-ref2va-turbo4-v0.1-comfy-bf16"
+_SINGULARITY_CHECKPOINT_REQUIREMENTS = {
+    "compressed_modulation": True,
+    "adaln_curve_grid": 1025,
+    "time_embed_dim": 8,
+    "quantization_format": "int8_tensorwise",
+    "convrot": True,
+    "convrot_group_size": 256,
+    "qkv_layout": "grouped",
+}
 _ASSETS_ROOT = "minimax_h3"
 
 _TRANSFORMER = "minimax_h3_fl2va_pruned_fp8_scaled.safetensors"
@@ -1693,6 +1703,28 @@ class family_handler:
         fused_turbo = bool(
             (model_def or {}).get("minimax_h3_fused_turbo", False)
         )
+        explicit_video_vae = (
+            "minimax_h3_video_vae_filename" in (model_def or {})
+        )
+        video_vae_filename = str(
+            (model_def or {}).get("minimax_h3_video_vae_filename")
+            or (_VIDEO_VAE_INT8_CONVROT if fused_turbo else _VIDEO_VAE)
+        )
+        singularity = bool(
+            (model_def or {}).get("minimax_h3_singularity", False)
+        )
+        if singularity and fused_turbo:
+            raise ValueError(
+                "MiniMax H3 Singularity is a separate checkpoint, not the fused Turbo model."
+            )
+        if singularity and (
+            base_model_type != _REF2VA_MODEL_TYPE
+            or audio_only
+            or full_checkpoint
+        ):
+            raise ValueError(
+                "MiniMax H3 Singularity v1.3 is only supported as a Ref2VA References model."
+            )
         window_memory_policy = (
             (
                 _H3_FUSED_REFERENCE_WINDOW_MEMORY_POLICY
@@ -1735,6 +1767,13 @@ class family_handler:
             "the next window."
         )
         checkpoint_help = (
+            "SINGULARITY V1.3 — REFERENCES (EXPERIMENTAL)\n"
+            "Reference-focused experimental model with a pinned 21 GB pruned "
+            "INT8 ConvRot checkpoint. The recommended LightX2V Ref2VA Turbo4 "
+            "adapter is 1.96 GB and defaults to four Euler steps. Turbo off "
+            "uses the ordinary 20-step H3 recipe."
+            if singularity
+            else
             "FUSED TURBO PREVIEW\n"
             "This community checkpoint already contains the Ref2VA delta, "
             "LightX2V Turbo, Mystic, and INT8 ConvRot conversion. Maestro "
@@ -1869,7 +1908,7 @@ class family_handler:
             # to INT8 does not download a second ~20B transformer.
             "compatible_model_paths": (
                 {}
-                if full_checkpoint or fused_turbo
+                if full_checkpoint or fused_turbo or singularity
                 else {
                     (
                         _REF2VA_TRANSFORMER
@@ -1897,7 +1936,7 @@ class family_handler:
             ),
             "compatible_model_qkv_layouts": (
                 {}
-                if full_checkpoint or fused_turbo
+                if full_checkpoint or fused_turbo or singularity
                 else {
                     (
                         _WANGP_REF2VA_PRUNED_TRANSFORMER
@@ -1927,6 +1966,48 @@ class family_handler:
             },
             "minimax_h3_full_checkpoint": full_checkpoint,
             "minimax_h3_fused_turbo": fused_turbo,
+            "minimax_h3_singularity": singularity,
+            "minimax_h3_model_id": (
+                _SINGULARITY_MODEL_ID if singularity else ""
+            ),
+            "minimax_h3_default_turbo_preset": (
+                str(
+                    (model_def or {}).get(
+                        "minimax_h3_default_turbo_preset"
+                    )
+                    or _SINGULARITY_DEFAULT_TURBO_PRESET
+                )
+                if singularity
+                else str(
+                    (model_def or {}).get(
+                        "minimax_h3_default_turbo_preset"
+                    )
+                    or ""
+                )
+            ),
+            "minimax_h3_turbo_mode_default": singularity,
+            "minimax_h3_unaccelerated_default_steps": int(
+                (model_def or {}).get(
+                    "minimax_h3_unaccelerated_default_steps", 20
+                )
+            ),
+            "minimax_h3_checkpoint_requirements": dict(
+                (model_def or {}).get(
+                    "minimax_h3_checkpoint_requirements", {}
+                )
+                or (
+                    _SINGULARITY_CHECKPOINT_REQUIREMENTS
+                    if singularity
+                    else {}
+                )
+            ),
+            "source_repo": str((model_def or {}).get("source_repo") or ""),
+            "source_revision": str(
+                (model_def or {}).get("source_revision") or ""
+            ),
+            "source_sha256": str((model_def or {}).get("source_sha256") or ""),
+            "source_size_bytes": (model_def or {}).get("source_size_bytes"),
+            "model_size_gb": (model_def or {}).get("model_size_gb"),
             "lock_inference_steps": False if fused_turbo else bool(
                 (model_def or {}).get("lock_inference_steps", False)
             ),
@@ -1946,14 +2027,17 @@ class family_handler:
             ),
             "minimax_h3_qkv_layout": (
                 "grouped"
-                if fused_turbo
+                if fused_turbo or singularity
                 else ("interleaved" if full_checkpoint else "contiguous")
             ),
             "minimax_h3_sampler": (
                 "res_multistep" if fused_turbo else "euler"
             ),
             "minimax_h3_video_vae_filename": (
-                _VIDEO_VAE_INT8_CONVROT if fused_turbo else _VIDEO_VAE
+                video_vae_filename
+            ),
+            "minimax_h3_video_vae_auto": (
+                not explicit_video_vae and not fused_turbo
             ),
             "loras_disabled": False,
             "minimax_h3_transformer_working_vram_gb": (
@@ -1967,6 +2051,11 @@ class family_handler:
             ),
             "selector_help": f"{workflow_help}\n\n{checkpoint_help}",
             "lora_compatibility_note": (
+                "The LightX2V Ref2VA Turbo4 adapter is the default "
+                "four-step accelerator at strength 1. Select only one H3 Turbo "
+                "or PDD adapter; other H3 LoRAs remain experimental."
+                if singularity
+                else
                 "Experimental H3 LoRA support. Start with one adapter at low strength; "
                 "Turbo/PDD, VDN and DoRA adapters are excluded. Mystic remains baked in at 0.7."
                 if fused_turbo
@@ -2119,6 +2208,35 @@ class family_handler:
         return 32
 
     @staticmethod
+    def resolve_runtime_model_def(model_def, runtime_context=None):
+        """Select the default video VAE from the active transformer format.
+
+        Definitions that supply ``minimax_h3_video_vae_filename`` own that
+        choice. Ordinary H3 definitions leave it automatic so an INT8
+        transformer can use the matching compact ConvRot decoder while FP8,
+        BF16, and unset runtime modes retain the established FP16 decoder.
+        """
+
+        if not isinstance(model_def, dict):
+            return model_def
+        if model_def.get("minimax_h3_video_vae_auto") is not True:
+            return model_def
+        context = runtime_context if isinstance(runtime_context, dict) else {}
+        quantization = str(
+            context.get("transformer_quantization") or ""
+        ).strip().lower()
+        filename = (
+            _VIDEO_VAE_INT8_CONVROT
+            if quantization == "int8"
+            else _VIDEO_VAE
+        )
+        if model_def.get("minimax_h3_video_vae_filename") == filename:
+            return model_def
+        resolved = dict(model_def)
+        resolved["minimax_h3_video_vae_filename"] = filename
+        return resolved
+
+    @staticmethod
     def query_model_files(computeList, base_model_type, model_def=None):
         processor_files = [
             "chat_template.json",
@@ -2132,6 +2250,11 @@ class family_handler:
         fused_turbo = bool(
             (model_def or {}).get("minimax_h3_fused_turbo", False)
         )
+        video_vae_filename = str(
+            (model_def or {}).get("minimax_h3_video_vae_filename")
+            or (_VIDEO_VAE_INT8_CONVROT if fused_turbo else _VIDEO_VAE)
+        )
+        int8_video_vae = video_vae_filename == _VIDEO_VAE_INT8_CONVROT
         vae_downloads = (
             [
                 {
@@ -2149,7 +2272,7 @@ class family_handler:
                     "fileList": [[_AUDIO_VAE]],
                 },
             ]
-            if fused_turbo
+            if int8_video_vae
             else [
                 {
                     "repoId": _COMFY_REPO,
@@ -2317,6 +2440,10 @@ class family_handler:
             normalize_audio_settings(ui_defaults, validate_prompt=False)
             return
 
+        from models.minimax_h3.duration import apply_h3_duration_override
+        model_def = apply_h3_duration_override(ui_defaults, model_def or {})
+        maximum_frames = int(model_def.get("frames_maximum") or _H3_MAX_FRAMES)
+
         try:
             requested_frames = int(ui_defaults.get("video_length", 124))
         except (TypeError, ValueError):
@@ -2333,13 +2460,13 @@ class family_handler:
         outpaint_text = str(ui_defaults.get("video_guide_outpainting") or "").strip()
         outpainting = bool(outpaint_text) and not outpaint_text.startswith("#")
         exact_outpaint_timeline = outpainting and ui_defaults.get("minimax_h3_multi_window") is True
-        if requested_frames <= _H3_MAX_FRAMES + 1 and not exact_outpaint_timeline:
+        if requested_frames <= maximum_frames + 1 and not exact_outpaint_timeline:
             ui_defaults["video_length"] = min(
-                _H3_MAX_FRAMES,
+                maximum_frames,
                 max(_H3_MIN_FRAMES, aligned_frames),
             )
         elif omni_reference and not omni_sequence:
-            ui_defaults["video_length"] = _H3_MAX_FRAMES
+            ui_defaults["video_length"] = maximum_frames
         else:
             # A long First/Last or enabled Omni Reference Sequence setting is
             # the joined output duration, not one H3 pass.
@@ -2350,13 +2477,13 @@ class family_handler:
 
         try:
             requested_window = int(
-                ui_defaults.get("sliding_window_size", _H3_MAX_FRAMES)
+                ui_defaults.get("sliding_window_size", maximum_frames)
             )
         except (TypeError, ValueError):
-            requested_window = _H3_MAX_FRAMES
+            requested_window = maximum_frames
         aligned_window = align_num_frames(max(1, requested_window))
         ui_defaults["sliding_window_size"] = min(
-            _H3_MAX_FRAMES,
+            maximum_frames,
             max(_H3_MIN_FRAMES, aligned_window),
         )
         if (
@@ -2485,6 +2612,9 @@ class family_handler:
             except (ValueError, TypeError) as error:
                 return str(error)
             return None
+        from models.minimax_h3.duration import apply_h3_duration_override
+        model_def = apply_h3_duration_override(inputs, model_def or {})
+        maximum_frames = int(model_def.get("frames_maximum") or _H3_MAX_FRAMES)
         custom = inputs.get("custom_settings") or {}
         if custom.get("audio_refinement") == "enabled":
             if (model_def or {}).get("lock_inference_steps") or (model_def or {}).get("minimax_h3_fused_turbo"):
@@ -2652,7 +2782,7 @@ class family_handler:
         )
         if omni_reference and not omni_sequence:
             inputs["video_length"] = min(
-                _H3_MAX_FRAMES,
+                maximum_frames,
                 max(_H3_MIN_FRAMES, align_h3_num_frames(max(1, requested_frames))),
             )
             inputs["sliding_window_size"] = inputs["video_length"]
@@ -2662,9 +2792,9 @@ class family_handler:
                 and bool(str(inputs.get("video_guide_outpainting") or "").strip())
                 and not str(inputs.get("video_guide_outpainting") or "").strip().startswith("#")
             )
-            if requested_frames <= _H3_MAX_FRAMES + 1 and not exact_outpaint_timeline:
+            if requested_frames <= maximum_frames + 1 and not exact_outpaint_timeline:
                 requested_frames = min(
-                    _H3_MAX_FRAMES,
+                    maximum_frames,
                     max(
                         _H3_MIN_FRAMES,
                         align_h3_num_frames(max(1, requested_frames)),
@@ -2676,12 +2806,12 @@ class family_handler:
 
             try:
                 requested_window = int(
-                    inputs.get("sliding_window_size", _H3_MAX_FRAMES)
+                    inputs.get("sliding_window_size", maximum_frames)
                 )
             except (TypeError, ValueError):
-                requested_window = _H3_MAX_FRAMES
+                requested_window = maximum_frames
             inputs["sliding_window_size"] = min(
-                _H3_MAX_FRAMES,
+                maximum_frames,
                 max(
                     _H3_MIN_FRAMES,
                     align_h3_num_frames(max(1, requested_window)),

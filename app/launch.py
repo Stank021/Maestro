@@ -2193,6 +2193,7 @@ def _minimax_h3_turbo_option(model_def: dict) -> dict | None:
         full_checkpoint=full_checkpoint,
     )
     default_preset = minimax_h3_turbo_preset(
+        (model_def or {}).get("minimax_h3_default_turbo_preset"),
         workflow=workflow,
         full_checkpoint=full_checkpoint,
     )
@@ -2221,6 +2222,12 @@ def _minimax_h3_turbo_option(model_def: dict) -> dict | None:
         "label": "Turbo mode",
         "experimental": True,
         "preset_id": str(default_preset["id"]),
+        "default_enabled": bool(
+            (model_def or {}).get("minimax_h3_default_turbo_preset")
+        ),
+        "unaccelerated_steps": (model_def or {}).get(
+            "minimax_h3_unaccelerated_default_steps"
+        ),
         "version_label": str(default_preset["label"]),
         "steps": int(default_preset["steps"]),
         "weight": float(default_preset["weight"]),
@@ -2807,6 +2814,16 @@ def _is_minimax_h3_identity(*values) -> bool:
     return "minimaxh3" in compact
 
 
+def _is_qwen21_identity(*values) -> bool:
+    """Recognize the 7B image architecture without matching older Qwen models."""
+    import re
+
+    return any(re.search(
+        r"(?<![a-z0-9])qwen[\s._-]*(?:image[\s._-]*)?2[._-]1(?![a-z0-9])",
+        str(value), re.IGNORECASE,
+    ) for value in values if value)
+
+
 CIVIT_TO_LOCAL_ARCH = {
     # Wan Video
     "Wan Video 14B t2v": "t2v",
@@ -2846,6 +2863,8 @@ CIVIT_TO_LOCAL_ARCH = {
     "MiniMax H3": "minimax_h3",
     # Qwen Image
     "Qwen": "qwen_image_20B",
+    # CivitAI calls the new 7B Qwen Image 2.1 architecture "Qwen 2".
+    "Qwen 2": "qwen_image_21_7B",
     # Krea 2
     "Krea 2": "krea2",
     # Other
@@ -2937,6 +2956,7 @@ HF_BASE_TO_LOCAL_DIR = {
     "tencent/HunyuanVideo": "hunyuan",
     "Qwen/Qwen-Image-Edit-2511": "qwen",
     "Alibaba/Qwen-Image-20B": "qwen",
+    "Qwen/Qwen-Image-2.1": "qwen21",
     "krea/Krea-2-Raw": "krea2",
     "krea/Krea-2-Turbo": "krea2",
     "DeepBeepMeep/krea-2": "krea2",
@@ -2983,6 +3003,7 @@ CIVITAI_MODEL_FILTERS = [
     {"label": "Flux.2 Klein 9B", "civitai_base": "Flux.2 Klein 9B,Flux.2 Klein 9B-base", "default_dir": "flux2_klein_9b"},
     {"label": "Flux.2 Klein 4B", "civitai_base": "Flux.2 Klein 4B,Flux.2 Klein 4B-base", "default_dir": "flux2_klein_4b"},
     {"label": "Qwen", "civitai_base": "Qwen", "default_dir": "qwen"},
+    {"label": "Qwen Image 2.1", "civitai_base": "Qwen 2", "default_dir": "qwen21"},
     {"label": "Krea 2", "civitai_base": "Krea 2", "default_dir": "krea2"},
     {"label": "ZImageTurbo", "civitai_base": "ZImageTurbo", "default_dir": "z_image"},
 ]
@@ -4810,6 +4831,9 @@ async def hf_import_lora(request: Request):
             if _is_minimax_h3_identity(_identity_blob):
                 target_dir = "minimax_h3"
                 hf_base_label = "MiniMax H3 (detected from repo name/tags)"
+            elif _is_qwen21_identity(repo_id.split("/")[-1], *base_models, *(repo.get("tags") or [])):
+                target_dir = "qwen21"
+                hf_base_label = "Qwen Image 2.1"
             elif "ltx-2.3" in _identity_blob or "ltx2.3" in _identity_blob or "ltx_2_3" in _identity_blob:
                 target_dir = "ltx2"
                 hf_base_label = "LTX-2.3 (detected from repo name/tags)"
@@ -6171,6 +6195,9 @@ def get_model_options(model_type: str):
         "background_removal_label": md.get("background_removal_label"),
         "max_image_refs": md.get("max_image_refs"),
         "sample_solvers": solvers,
+        "qwen21_acceleration_profiles": md.get("qwen21_acceleration_profiles"),
+        "image_ref_inpaint": md.get("image_ref_inpaint", False),
+        "model_modes": md.get("model_modes"),
 
         # Self refiner
         "self_refiner": md.get("self_refiner", False),
@@ -7186,6 +7213,8 @@ def get_services_config():
         "llm_remote_api_key_set": bool(services.get("llm_remote_api_key", "")),
         "enhance_llm_model_id": services.get("enhance_llm_model_id", ""),
         "enhance_llm_device": services.get("enhance_llm_device", "cuda"),
+        "enhance_fidelity_retries": services.get("enhance_fidelity_retries", 1),
+        "enhance_fidelity_auto_continue": services.get("enhance_fidelity_auto_continue", False),
         "google_api_key": _mask_key(services.get("google_api_key", "")),
         "google_api_key_set": bool(services.get("google_api_key", "")),
         "openai_api_key": _mask_key(services.get("openai_api_key", "")),
@@ -7266,10 +7295,13 @@ def get_services_config():
 async def update_services_config(request: Request):
     """Update services configuration. API keys are stored in full, returned masked."""
     body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Settings must be an object.")
 
     ALLOWED_KEYS = {
         "llm_model_id", "llm_device", "llm_provider", "llm_remote_url",
         "enhance_llm_model_id", "enhance_llm_device",
+        "enhance_fidelity_retries", "enhance_fidelity_auto_continue",
         "google_api_key", "llm_remote_api_key", "openai_api_key", "anthropic_api_key",
         "use_director_v2", "nsfw_mode", "nsfw_accepted_at", "director_prompt_polish",
         "civitai_api_key", "voice_reference_enabled", "ltx_progressive_pipeline",
@@ -7278,15 +7310,27 @@ async def update_services_config(request: Request):
         "flashvsr_mode", "flashvsr_topk_ratio", "flashvsr_backend",
     }
 
-    services = wgp.server_config.setdefault("services", {})
+    previous_services = wgp.server_config.get("services", {})
+    services = dict(previous_services)
     updated = {}
+    ignored_mask = False
 
     for key, value in body.items():
         if key not in ALLOWED_KEYS:
             continue
-        # Don't overwrite a real key with its masked version
-        if key.endswith("_api_key") and value and "..." in value:
-            continue
+        if key == "enhance_fidelity_retries" and (type(value) is not int or not 0 <= value <= 5):
+            raise HTTPException(status_code=400, detail="Fidelity retries must be a whole number from 0 to 5.")
+        if key == "enhance_fidelity_auto_continue" and type(value) is not bool:
+            raise HTTPException(status_code=400, detail="Continue after fidelity warnings must be true or false.")
+        if key.endswith("_api_key"):
+            if not isinstance(value, str):
+                raise HTTPException(status_code=400, detail="API keys must be text.")
+            # Only the current display placeholder is a mask. Real keys can
+            # contain ellipses; short existing keys are displayed as ***.
+            existing_key = services.get(key, "")
+            if existing_key and value == _mask_key(existing_key):
+                ignored_mask = True
+                continue
         services[key] = value
         updated[key] = _mask_key(value) if key.endswith("_api_key") else value
 
@@ -7303,12 +7347,19 @@ async def update_services_config(request: Request):
             updated["nsfw_mode"] = False
 
     if not updated:
+        if ignored_mask:
+            return {"status": "ok", "updated": {}}
         raise HTTPException(status_code=400, detail="No valid fields to update")
 
     wgp.server_config["services"] = services
-
-    with open(wgp.server_config_filename, "w", encoding="utf-8") as f:
-        f.write(json.dumps(wgp.server_config, indent=4))
+    try:
+        _persist_server_config()
+    except OSError as error:
+        wgp.server_config["services"] = previous_services
+        raise HTTPException(
+            status_code=500,
+            detail="Could not save settings. Check config file permissions and try again.",
+        ) from error
 
     return {"status": "ok", "updated": updated}
 
@@ -7916,12 +7967,12 @@ def llm_stream_status():
     return llm_service.get_stream_status()
 
 
-def _ensure_llm_loaded():
+def _ensure_llm_loaded(model_id=None, device=None):
     """Auto-load LLM if not already loaded. Reloads if configured model changed."""
     from services import llm_service
     services = enhancement_settings(wgp.server_config.get("services", {}))
-    desired = services.get("llm_model_id", _DEFAULT_LLM_REPO)
-    desired_device = services.get("llm_device", _llm_default_device())
+    desired = model_id or services.get("llm_model_id", _DEFAULT_LLM_REPO)
+    desired_device = device or services.get("llm_device", _llm_default_device())
     desired_provider = services.get("llm_provider", "local")
     desired_remote_url = services.get("llm_remote_url", "")
     desired_api_key = llm_service.provider_api_key(
@@ -8106,7 +8157,7 @@ async def llm_write_song(request: Request):
     from services.guide_loader import load_guide
     if selected_architecture == "yue2":
         from models.TTS.yue2.prompting import writer_duration_instruction
-        system_prompt = load_guide("music", "song_writer_yue2")
+        system_prompt = load_guide("music", "song_writer_yue2_instrumental" if instrumental else "song_writer_yue2")
         system_prompt += "\n\n" + writer_duration_instruction(body.get("duration_seconds"))
     elif is_minimax_music3 and instrumental:
         system_prompt = (
@@ -8230,7 +8281,7 @@ async def director_generate_music(request: Request):
         _ensure_llm_loaded()
         if selected_architecture == "yue2":
             from models.TTS.yue2.prompting import writer_duration_instruction
-            system_prompt = load_guide("music", "song_writer_yue2")
+            system_prompt = load_guide("music", "song_writer_yue2_instrumental" if instrumental else "song_writer_yue2")
             system_prompt += "\n\n" + writer_duration_instruction(duration_seconds)
         elif is_minimax_music3 and instrumental:
             system_prompt = (
@@ -8278,6 +8329,9 @@ async def director_generate_music(request: Request):
         raise HTTPException(status_code=400, detail="Provide a description, or style + lyrics")
 
     gen_params = _build_music_gen_params(model_type, lyrics, style, duration_seconds, seed)
+    if selected_architecture == "yue2" and instrumental:
+        gen_params.update(model_mode=0, _music_instrumental=True,
+                          custom_settings={**(gen_params.get('custom_settings') or {}), 'instrumental': True, 'abc': ''})
 
     out_dir = _workspace_dir(workspace)
     os.makedirs(out_dir, exist_ok=True)
@@ -8366,6 +8420,8 @@ async def llm_plan_h3_windows(request: Request):
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
     model_def = wgp.get_model_def(model_type) or {}
+    from models.minimax_h3.duration import apply_h3_duration_override
+    model_def = apply_h3_duration_override(body, model_def)
     if not str(model_def.get("architecture") or "").startswith("minimax_h3"):
         raise HTTPException(status_code=400, detail="H3 window planning requires a MiniMax H3 model.")
     if model_def.get("omni_reference"):
@@ -8379,6 +8435,7 @@ async def llm_plan_h3_windows(request: Request):
 
     sliding_defaults = model_def.get("sliding_window_defaults") or {}
     planning_inputs = {
+        "minimax_h3_extended_duration": body.get("minimax_h3_extended_duration") is True,
         "model_type": model_type,
         "resolution": body.get("resolution") or "864x480",
         "video_length": body.get("total_frames") or body.get("video_length") or 124,
@@ -8478,6 +8535,8 @@ async def llm_plan_h3_sequence(request: Request):
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
     model_def = wgp.get_model_def(model_type) or {}
+    from models.minimax_h3.duration import apply_h3_duration_override
+    model_def = apply_h3_duration_override(body, model_def)
     if not (
         str(model_def.get("architecture") or "").startswith("minimax_h3")
         and model_def.get("omni_reference")
@@ -8504,6 +8563,7 @@ async def llm_plan_h3_sequence(request: Request):
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     sequence_inputs = {
+        "minimax_h3_extended_duration": body.get("minimax_h3_extended_duration") is True,
         "resolution": body.get("resolution") or "864x480",
         "video_length": body.get("total_frames") or 124,
         "minimax_h3_sequence_clip_frames": body.get(
@@ -8656,7 +8716,12 @@ async def _llm_enhance_prompt_payload(body: dict):
     from services import llm_service
     from services.h3_prompt_budget import H3PromptBudgetError
 
-    if needs_h3_context_ir:
+    from services.h3_performance_audio import has_h3_performance_audio
+    performance_audio = (
+        model_type.lower().startswith("minimax_h3_ref2va")
+        and has_h3_performance_audio(body.get("reference_context"))
+    )
+    if needs_h3_context_ir and not performance_audio:
         try:
             llm_service.validate_h3_source_dialogue_duration(prompt, body.get("duration_seconds"))
         except H3PromptBudgetError as error:
@@ -8680,7 +8745,7 @@ async def _llm_enhance_prompt_payload(body: dict):
     # gated to Mature Mode, so no extra gate is needed here.
     raw_enhancer_mode = False
     _enh_mt = body.get("model_type", "")
-    if _enh_mt:
+    if _enh_mt and provider == "local":
         try:
             _md = wgp.get_model_def(_enh_mt)
             _pe = (_md or {}).get("prompt_enhancer_model")
@@ -8692,14 +8757,9 @@ async def _llm_enhance_prompt_payload(body: dict):
             print(f"[Enhance] Per-model enhancer lookup failed: {e}")
 
     if enhance_model:
-        # Load the enhance-specific LLM (may differ from Director LLM)
-        if llm_service.is_loaded():
-            status = llm_service.get_status()
-            if status.get("model_id") != enhance_model:
-                llm_service.unload_model()
-                llm_service.load_model(model_id=enhance_model, device=enhance_device)
-        else:
-            llm_service.load_model(model_id=enhance_model, device=enhance_device)
+        # An override changes the model, not its configured provider. Let the
+        # loader compare the full endpoint/credential identity before reuse.
+        _ensure_llm_loaded(model_id=enhance_model, device=enhance_device)
     else:
         # Use the Director LLM (default)
         _ensure_llm_loaded()
@@ -9065,6 +9125,8 @@ async def upload_audio(request: Request, file: UploadFile = File(...)):
                         except OSError:
                             pass
 
+    from services.media_info import record_upload
+    record_upload(filepath, file.filename)
     return {
         "filename": unique_name,
         "path": filepath,
@@ -10541,6 +10603,8 @@ async def _prepare_generation_submission(
     except Exception:
         _base_model_type = body.get("model_type")
     _generation_model_def = wgp.get_model_def(body["model_type"]) or {}
+    from models.minimax_h3.duration import apply_h3_duration_override
+    _generation_model_def = apply_h3_duration_override(body, _generation_model_def)
     if (
         _generation_model_def.get("infer_audio_prompt_from_guide", False)
         and body.get("audio_guide")
@@ -10623,6 +10687,7 @@ async def _prepare_generation_submission(
 
             turbo_applied = normalize_minimax_h3_turbo_request(
                 body,
+                model_def=_generation_model_def,
                 full_checkpoint=bool(
                     _generation_model_def.get(
                         "minimax_h3_full_checkpoint", False
@@ -14254,43 +14319,62 @@ def _compose_recast_character_masks(
     mapping_masks, colors, overlap_limit=0.35,
     background_color=(255, 255, 255),
 ):
-    """Merge separately tracked people into deterministic SCAIL color slots."""
+    """Merge SCAIL color slots with scratch memory bounded to one frame."""
     import numpy as np
 
     if not mapping_masks or len(mapping_masks) != len(colors):
         raise ValueError("Recast needs one tracked mask per character color.")
-    shape = np.asarray(mapping_masks[0]).shape
+    masks = [np.asarray(mask) for mask in mapping_masks]
+    shape = masks[0].shape
     if len(shape) not in (3, 4):
         raise ValueError(f"Unsupported Recast character-mask shape: {shape}.")
+    if any(mask.shape != shape for mask in masks):
+        raise ValueError("Every Recast character mask must have matching dimensions.")
     region_shape = shape[:-1] if shape[-1] == 3 else shape
+    if len(region_shape) not in (2, 3):
+        raise ValueError(f"Unsupported Recast character-mask shape: {shape}.")
     background = np.asarray(background_color, dtype=np.uint8)
     if background.shape != (3,):
         raise ValueError("Character-mask background must be one RGB color.")
+    palette = [np.asarray(color, dtype=np.uint8) for color in colors]
+    if any(color.shape != (3,) for color in palette):
+        raise ValueError("Each character-mask color must be one RGB color.")
     output = np.empty((*region_shape, 3), dtype=np.uint8)
-    output[...] = background
-    occupied = np.zeros(region_shape, dtype=bool)
+    # Keep output shape/API unchanged, but avoid allocating full-video region,
+    # overlap, occupancy, and integer index arrays. Boolean advanced indexing
+    # across a long RGB video can request tens of GB in int64 indices alone.
+    single_frame = len(region_shape) == 2
+    frame_count = 1 if single_frame else region_shape[0]
+    frame_shape = region_shape if single_frame else region_shape[1:]
+    occupied = np.empty(frame_shape, dtype=bool)
+    areas = [0] * len(masks)
+    overlap_areas = [0] * len(masks)
+    for frame_index in range(frame_count):
+        output_frame = output if single_frame else output[frame_index]
+        output_frame[...] = background
+        occupied.fill(False)
+        for index, (mask, color) in enumerate(zip(masks, palette)):
+            frame = mask if single_frame else mask[frame_index]
+            region = np.any(frame > 30, axis=-1) if shape[-1] == 3 else frame.astype(bool)
+            areas[index] += int(np.count_nonzero(region))
+            overlap_areas[index] += int(np.count_nonzero(region & occupied))
+            # Earlier cards keep priority at an occlusion. copyto broadcasts
+            # the color without building boolean-index coordinate arrays.
+            writable = region & ~occupied
+            np.copyto(output_frame, color, where=writable[..., None])
+            occupied |= region
+
     overlaps = []
-    for index, (raw_mask, color) in enumerate(zip(mapping_masks, colors)):
-        mask = np.asarray(raw_mask)
-        if mask.shape != shape:
-            raise ValueError("Every Recast character mask must have matching dimensions.")
-        region = np.any(mask > 30, axis=-1) if mask.shape[-1] == 3 else mask.astype(bool)
-        area = int(region.sum())
+    for index, (area, overlap_area) in enumerate(zip(areas, overlap_areas)):
         if area <= 0:
             raise ValueError(f"Character mapping {index + 1} matched no pixels.")
-        overlap = np.logical_and(region, occupied)
-        overlap_fraction = float(overlap.sum()) / float(max(1, area))
+        overlap_fraction = float(overlap_area) / float(area)
         overlaps.append(overlap_fraction)
         if overlap_fraction > float(overlap_limit):
             raise ValueError(
                 f"Character mapping {index + 1} overlaps an earlier mapping by "
                 f"{overlap_fraction:.0%}. Use more specific source descriptions."
             )
-        # Earlier cards win the occasional occlusion pixel, making color
-        # assignment stable regardless of SAM's internal object ordering.
-        writable = region & ~occupied
-        output[writable] = np.asarray(color, dtype=np.uint8)
-        occupied |= region
     return output, overlaps
 
 
@@ -23626,7 +23710,7 @@ def _resolve_tool_clip_path(raw_path, workspace=None):
 
 def _write_tool_sidecar(
     out_dir, filename, *, source_name, tool, params, elapsed, job_id,
-    media_type="video",
+    media_type="video", source_path=None,
 ):
     """Write a .meta.json sidecar so a Tools output shows up in the gallery
     with the right mode + edit_sub_mode tag (mirrors _run_sfx_generation)."""
@@ -23640,6 +23724,14 @@ def _write_tool_sidecar(
         "generation_time": round(elapsed),
         "created_at": time.time(),
     }
+    if tool in {"upscale", "media_flow"}:
+        from services.media_info import probe_media, processing_record
+        sidecar["processing"] = processing_record(
+            spatial=params.get("spatial_upsampling") or params.get("method", ""),
+            temporal=params.get("temporal_upsampling", ""), source_name=source_name,
+            before=probe_media(source_path or params.get("media_path")),
+            after=probe_media(os.path.join(out_dir, filename)), elapsed=elapsed,
+            completed_at=sidecar["created_at"], options=params)
     meta_path = os.path.join(out_dir, os.path.splitext(filename)[0] + ".meta.json")
     try:
         with open(meta_path, "w", encoding="utf-8") as f:
@@ -23662,6 +23754,7 @@ def _run_tool_upscale(job_id: str):
                 job, message="Preparing upscale...", phase="Preparing",
             ):
                 return False
+            start_time = time.time()
             if not register_abort_state(
                 job, job_id, _active_gen_states, abort_state,
             ):
@@ -23782,6 +23875,7 @@ def _run_tool_upscale(job_id: str):
                         filename,
                         source_name=os.path.basename(media_source),
                         tool="upscale",
+                        source_path=media_source,
                         params={
                             "method": method,
                             "model_type": "post_processing",
@@ -23900,6 +23994,7 @@ def _run_tool_upscale(job_id: str):
                     out_dir, fname,
                     source_name=os.path.basename(video_source),
                     tool="upscale",
+                    source_path=video_source,
                     params={"method": method, "model_type": "post_processing"},
                     elapsed=time.time() - start_time,
                     job_id=job_id,
@@ -24796,9 +24891,10 @@ def _apply_deferred_generation_preparation(job: dict) -> None:
         "started after the generation slot became available."
     )
     try:
-        prepared = asyncio.run(
-            _prepare_generation_submission(request_body, prepare_only=True)
-        )
+        with enhancement_context(_enhancement_settings_snapshot(), lambda: is_cancel_requested(job)):
+            prepared = asyncio.run(
+                _prepare_generation_submission(request_body, prepare_only=True)
+            )
         prepared_params = prepared.get("params")
         if not isinstance(prepared_params, dict):
             raise RuntimeError("Generation preparation returned invalid parameters.")
@@ -25340,6 +25436,8 @@ def _run_generation(job_id: str, *, finalize: bool = True, _slot_owned: bool = F
                     _mc_min_f, _mc_fs, _mc_latent = 17, 8, 8
                 try:
                     _mc_model_def = wgp.get_model_def(_mc_model_type) or {}
+                    from models.minimax_h3.duration import h3_duration_model_def
+                    _mc_model_def = h3_duration_model_def(_mc_model_def, raw_params)
                 except Exception:
                     _mc_model_def = {}
                 _mc_is_h3 = str(
@@ -25655,6 +25753,7 @@ def _run_generation(job_id: str, *, finalize: bool = True, _slot_owned: bool = F
             join_output_file = None
             active_generation_seconds_by_output: dict[str, int] = {}
             model_metadata_by_output: dict[str, dict] = {}
+            processing_by_output: dict[str, dict] = {}
             active_generation_seconds_by_task: dict[int, int] = {}
             multi_window_timing_by_output: dict[str, dict] = {}
             multi_window_timing_by_task: dict[int, dict] = {}
@@ -25863,6 +25962,8 @@ def _run_generation(job_id: str, *, finalize: bool = True, _slot_owned: bool = F
                     file_sidecar["params"] = sidecar_params.copy()
                     if fname in model_metadata_by_output:
                         file_sidecar["model_details"] = model_metadata_by_output[fname]
+                    if fname in processing_by_output:
+                        file_sidecar["processing"] = processing_by_output[fname]
                     resolved_seed = _extract_output_seed(fname)
                     if resolved_seed is not None:
                         # A request seed of -1 means "choose randomly".  The
@@ -26209,6 +26310,11 @@ def _run_generation(job_id: str, *, finalize: bool = True, _slot_owned: bool = F
                             for output_path in data.get("outputs") or []:
                                 if isinstance(output_path, str):
                                     model_metadata_by_output[os.path.basename(output_path)] = data["metadata"]
+                    elif cmd == "processing_metadata":
+                        if isinstance(data, dict) and isinstance(data.get("metadata"), dict):
+                            for output_path in data.get("outputs") or []:
+                                if isinstance(output_path, str):
+                                    processing_by_output[os.path.basename(output_path)] = data["metadata"]
                     elif cmd == "generation_time":
                         try:
                             timing_window_seconds = None
@@ -27090,10 +27196,18 @@ def _run_generation(job_id: str, *, finalize: bool = True, _slot_owned: bool = F
                             update_job(job, phase=phase, message=phase, step=int(step or 0),
                                        total_steps=int(total or 0))
                         try:
+                            from services.media_info import probe_media, processing_record
+                            before_processing = probe_media(video_path)
+                            finishing_started = time.monotonic()
                             process_video(video_path, temporary, spatial=pp_media_spatial,
                                 temporal=pp_media_temporal, options=pp_media_options,
                                 abort=lambda: is_cancel_requested(job), progress=media_progress)
                             os.replace(temporary, video_path)
+                            processing_by_output[fname] = processing_record(
+                                spatial=pp_media_spatial, temporal=pp_media_temporal,
+                                before=before_processing, after=probe_media(video_path),
+                                elapsed=time.monotonic() - finishing_started,
+                                completed_at=time.time(), options=pp_media_options)
                         finally:
                             if os.path.isfile(temporary):
                                 os.remove(temporary)
@@ -27119,7 +27233,14 @@ def _run_generation(job_id: str, *, finalize: bool = True, _slot_owned: bool = F
                             ):
                                 return False
                             print(f"  [Upscale] Applying {pp_spatial_upsampling} to {fname}")
+                            from services.media_info import probe_media, processing_record
+                            before_processing = probe_media(video_path)
+                            finishing_started = time.monotonic()
                             _apply_spatial_upsampling_to_file(video_path, pp_spatial_upsampling, job=job)
+                            processing_by_output[fname] = processing_record(
+                                spatial=pp_spatial_upsampling, before=before_processing,
+                                after=probe_media(video_path), elapsed=time.monotonic() - finishing_started,
+                                completed_at=time.time())
                             print(f"  [Upscale] Done: {fname}")
                         except Exception as up_err:
                             print(f"  [Upscale] Warning: failed on {fname} (keeping original): {up_err}")
@@ -28216,6 +28337,14 @@ async def retry_enhanced_job(job_id: str, request: Request):
             # multi-window prompts; no hidden AI pass or silent fallback.
             record.update(state="complete", prepared=manual_prepared, error=None,
                           enhanced_prompt=record["original_prompt"], warnings=["Generate as written was selected."])
+        if action in {"retry", "refresh"} and record.get("state") != "complete":
+            # Apply the current repair preferences to this explicitly requested
+            # attempt while retaining its original writer and source settings.
+            current_settings = _enhancement_settings_snapshot()
+            record.setdefault("settings", {}).update(
+                enhance_fidelity_retries=current_settings.get("enhance_fidelity_retries", 1),
+                enhance_fidelity_auto_continue=current_settings.get("enhance_fidelity_auto_continue", False),
+            )
         new_id = uuid.uuid4().hex[:8]
         job = {"id": new_id, "status": "queued", "show_in_gallery": True,
                "progress": 0, "step": 0, "total_steps": 0, "phase": "", "message": "Waiting",
@@ -28471,17 +28600,8 @@ def list_outputs(limit: int = 0, offset: int = 0, favorites_only: bool = False,
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@api.get("/api/v1/file/{filename:path}")
-def serve_file(filename: str, workspace: str = ""):
-    """Serve an output file. Checks active workspace first, then all workspaces.
-
-    Uses share_delete_file_response so that on Windows the file can be
-    deleted/renamed by the gallery delete button even while the browser
-    is actively streaming it (e.g. mid-video playback). Without share-
-    delete, Python's default open() locks the file for delete and the
-    user has to close the entire app to clean up.
-    """
-    from services.win_safe_files import share_delete_file_response
+def _resolve_gallery_media_file(filename: str, workspace: str = "") -> str:
+    """Resolve gallery media with the same folder boundaries as /api/v1/file."""
     save_root = wgp.server_config.get("save_path", "outputs")
     requested_workspace = str(workspace or "").strip()
     if requested_workspace:
@@ -28493,23 +28613,23 @@ def serve_file(filename: str, workspace: str = ""):
                 raise HTTPException(status_code=400, detail="Invalid workspace name")
         filepath = _safe_join(requested_root, filename)
         if filepath and os.path.isfile(filepath):
-            return share_delete_file_response(filepath)
+            return filepath
         raise HTTPException(status_code=404, detail="File not found")
     # 1. Check active workspace
     filepath = _safe_join(_workspace_dir(), filename)
     if filepath and os.path.isfile(filepath):
-        return share_delete_file_response(filepath)
+        return filepath
     # 2. Check base save_path (pre-workspace files)
     filepath = _safe_join(save_root, filename)
     if filepath and os.path.isfile(filepath):
-        return share_delete_file_response(filepath)
+        return filepath
     # 3. Search all workspace subdirectories (Director pipeline may have saved
     #    to a different workspace than the one currently active in the browser)
     if os.path.isdir(save_root):
         for d in os.listdir(save_root):
             candidate = _safe_join(save_root, d, filename)
             if candidate and os.path.isfile(candidate):
-                return share_delete_file_response(candidate)
+                return candidate
     # 4. Uploads folder — the gallery's virtual "Uploads" view lists these
     #    files with the same /api/v1/file/ URLs every other gallery flow
     #    builds (thumbnails, playback, send-to-input). Upload names are
@@ -28517,8 +28637,31 @@ def serve_file(filename: str, workspace: str = ""):
     #    an output name can never be shadowed by an upload.
     filepath = _safe_join(os.path.join(os.getcwd(), "uploads"), filename)
     if filepath and os.path.isfile(filepath):
-        return share_delete_file_response(filepath)
+        return filepath
     raise HTTPException(status_code=404, detail="File not found")
+
+
+@api.get("/api/v1/thumbnail/{filename:path}")
+def serve_gallery_thumbnail(filename: str, workspace: str = ""):
+    """Return an on-demand first-frame JPEG for a local gallery video."""
+    from services.gallery_thumbnails import get_video_poster
+    filepath = _resolve_gallery_media_file(filename, workspace)
+    poster = get_video_poster(filepath)
+    if poster is None:
+        raise HTTPException(status_code=404, detail="Thumbnail not available")
+    return FileResponse(
+        poster,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=60, must-revalidate"},
+    )
+
+
+@api.get("/api/v1/file/{filename:path}")
+def serve_file(filename: str, workspace: str = ""):
+    """Serve local gallery media, keeping Windows delete/rename sharing."""
+    from services.win_safe_files import share_delete_file_response
+    filepath = _resolve_gallery_media_file(filename, workspace)
+    return share_delete_file_response(filepath)
 
 
 @api.get("/api/v1/outputs/{name}/metadata")
@@ -28528,6 +28671,12 @@ def get_output_metadata(name: str, workspace: str = ""):
     filepath = _safe_join(out_dir, name)
     if filepath is None or not os.path.isfile(filepath):
         raise HTTPException(status_code=404, detail="Output file not found")
+
+    from services.media_info import enrich_metadata
+
+    def _with_file_details(metadata):
+        return enrich_metadata(filepath, metadata,
+            source_roots=(out_dir, os.path.join(os.getcwd(), "uploads")))
 
     # Helper: read embedded metadata from the media file
     def _read_embedded():
@@ -28552,8 +28701,14 @@ def get_output_metadata(name: str, workspace: str = ""):
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
                 sidecar = json.load(f)
+            # An upload date sidecar must not conceal generation metadata
+            # already embedded in an imported image, video or audio file.
+            if "params" not in sidecar:
+                imported_params = _read_embedded()
+                if isinstance(imported_params, dict):
+                    sidecar["params"] = imported_params
             # Merge actual seed from embedded metadata if sidecar has seed=-1
-            params = sidecar.get("params", {})
+            params = sidecar.get("params") or {}
             if params.get("seed", -1) == -1:
                 embedded = _read_embedded()
                 if embedded and "seed" in embedded:
@@ -28562,16 +28717,16 @@ def get_output_metadata(name: str, workspace: str = ""):
                     resolved_seed = _extract_output_seed(name)
                     if resolved_seed is not None:
                         params["seed"] = resolved_seed
-            return {"source": "sidecar", **sidecar}
+            return _with_file_details({"source": "sidecar", **sidecar})
         except Exception:
             pass
 
     # Strategy 2: Read embedded metadata from media file
     embedded = _read_embedded()
     if embedded:
-        return {"source": "embedded", "params": embedded}
+        return _with_file_details({"source": "embedded", "params": embedded})
 
-    return {"source": "none", "params": None}
+    return _with_file_details({"source": "none", "params": None})
 
 
 @api.post("/api/v1/outputs/rejoin")
@@ -28859,6 +29014,36 @@ def delete_output(name: str, workspace: str = ""):
     return {"deleted": name}
 
 
+@api.delete("/api/v1/uploads/{name}")
+def delete_upload(name: str):
+    """Delete one upload, preserving generated media and active job inputs."""
+    from services.upload_media import upload_path, references_upload, delete_upload_file
+    from services.win_safe_files import safe_delete
+    root = os.path.join(os.getcwd(), "uploads")
+    try:
+        path = upload_path(root, name)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    for job in list(_jobs.values()):
+        state = snapshot_job(job)
+        if state.get("status") in {"held", "queued", "running", "cancelling"} and references_upload(state.get("params"), path):
+            raise HTTPException(409, "This upload is used by an active or queued job. Finish or remove that job before deleting it.")
+    # Director may be planning or waiting for review between its child jobs.
+    # Its queued projects already copy source assets into their own directory.
+    director = sys.modules.get("services.director_pipeline")
+    if director is not None:
+        with director._pipeline_lock:
+            for pipeline in director._pipelines.values():
+                if pipeline.get("status") in director._ACTIVE_PIPELINE_STATUSES and references_upload(pipeline, path):
+                    raise HTTPException(409, "This upload is used by an active Director project. Stop that project before deleting it.")
+    try:
+        return delete_upload_file(root, name, safe_delete=safe_delete)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(409, str(error)) from error
+
+
 @api.post("/api/v1/upload")
 async def upload_image(request: Request, file: UploadFile = File(...), reuse_identical: bool = False):
     """Upload an image or audio/video asset. Image was the original use;
@@ -28937,6 +29122,8 @@ async def upload_image(request: Request, file: UploadFile = File(...), reuse_ide
                         except OSError:
                             pass
 
+    from services.media_info import record_upload
+    record_upload(filepath, file.filename)
     result = {
         "filename": unique_name,
         "path": filepath,
